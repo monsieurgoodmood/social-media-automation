@@ -1,3 +1,6 @@
+# data_processing.py
+
+import csv
 import os
 import pandas as pd
 from config import FACEBOOK_PAGE_ID
@@ -35,31 +38,36 @@ def calculate_total_reactions(reactions_dict):
     return 0
 
 def append_to_csv(data, filename='facebook_post_insights.csv'):
-    """Ajoute des données dans un fichier CSV."""
+    """Ajoute des données dans un fichier CSV en gérant les sauts de ligne et guillemets."""
     folder_path = os.path.join(os.path.dirname(__file__), 'data')
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
 
     file_path = os.path.join(folder_path, filename)
-    df = pd.DataFrame(data)
-    
-    if not os.path.exists(file_path):
-        df.to_csv(file_path, index=False)
-    else:
-        df.to_csv(file_path, mode='a', header=False, index=False)
-    
-    print(f"Données sauvegardées dans {file_path}")
 
-def clean_old_posts(sheet_name, days=45):
-    """Supprime les posts de plus de 45 jours dans Google Sheets."""
-    client = get_google_sheets_client()
-    sheet = client.open(sheet_name).sheet1
-    
-    data = sheet.get_all_records()
-    updated_data = [row for row in data if (pd.Timestamp.now() - pd.to_datetime(row['Created Time'])).days <= days]
-    
-    sheet.clear()
-    sheet.append_rows(updated_data)
+    # Détecter si on traite les posts ou les métriques de la page
+    if filename == 'facebook_post_insights.csv':
+        fieldnames = ['Post ID', 'Created Time', 'Content Type', 'Title', 'Post URL', 'Impressions', 'Engagements', 'Reactions']
+    elif filename == 'facebook_page_metrics.csv':
+        fieldnames = ['Date', 'Fan Count', 'Followers']
+    else:
+        raise ValueError("Unrecognized filename for CSV export")
+
+    # Ouverture du fichier en mode append avec gestion des sauts de ligne
+    with open(file_path, 'a', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL, escapechar='\\')
+
+        # Si le fichier est vide, écrire les en-têtes
+        if os.stat(file_path).st_size == 0:
+            writer.writeheader()
+
+        # Écrire les lignes des données
+        for row in data:
+            if 'Title' in row:
+                row['Title'] = clean_text(row['Title'])  # Nettoyer le titre pour les posts
+            writer.writerow(row)
+
+    print(f"Données sauvegardées dans {file_path}")
 
 def process_data():
     """Traite et stocke les données des posts Facebook."""
@@ -93,7 +101,7 @@ def process_data():
             'Post ID': post_id,
             'Created Time': post['created_time'],
             'Content Type': content_type,
-            'Title': title,
+            'Title': clean_text(title),  # Nettoyer le titre avant de l'ajouter
             'Post URL': post_url,
             'Impressions': impressions or 'N/A',
             'Engagements': engagements or 'N/A',
@@ -112,3 +120,13 @@ def update_page_metrics():
         'Followers': metrics.get('followers_count', 'N/A')
     }
     append_to_csv([page_data], filename='facebook_page_metrics.csv')
+
+def clean_text(text):
+    """Nettoie le texte pour supprimer les sauts de ligne et espaces multiples."""
+    if isinstance(text, str):
+        # Remplacer les sauts de ligne et retours chariot par des espaces
+        text = text.replace('\n', ' ').replace('\r', ' ')
+        # Éliminer les espaces multiples
+        text = ' '.join(text.split())
+    return text
+

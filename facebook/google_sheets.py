@@ -1,18 +1,45 @@
+# google_sheets.py
+
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import os
+import csv
 
 def get_google_sheets_client():
-    """Authentification à Google Sheets."""
+    """Initialise et retourne un client Google Sheets autorisé."""
+    # Scopes nécessaires pour accéder à Google Sheets et Drive
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name('path_to_creds.json', scope)
-    return gspread.authorize(creds)
+
+    # Chemin vers le fichier JSON des credentials
+    creds_path = 'credentials/service_account_credentials.json'
+
+    # Charger les credentials
+    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
+
+    # Autoriser l'application avec les credentials
+    client = gspread.authorize(creds)
+    return client
 
 def upload_to_google_sheets(csv_file, sheet_name):
-    """Charge les données du CSV dans Google Sheets."""
+    """Upload les données CSV dans une feuille Google Sheets."""
     client = get_google_sheets_client()
-    sheet = client.open(sheet_name).sheet1
     
-    with open(csv_file, 'r') as file:
-        content = file.readlines()
-        for i, row in enumerate(content):
-            sheet.insert_row(row.strip().split(','), i + 1)
+    try:
+        sheet = client.open(sheet_name).sheet1
+    except gspread.SpreadsheetNotFound:
+        print(f"Erreur: La feuille '{sheet_name}' n'a pas été trouvée.")
+        return
+
+    # Vérifier si le fichier CSV existe
+    if not os.path.exists(csv_file):
+        print(f"Erreur: Le fichier {csv_file} n'existe pas.")
+        return
+
+    # Lire le fichier CSV et uploader les données
+    with open(csv_file, 'r', encoding='utf-8') as file:
+        reader = csv.reader(file)
+        for i, row in enumerate(reader):
+            if row:  # Éviter les lignes vides
+                sheet.insert_row(row, i + 1)
+
+    print("Upload terminé.")
