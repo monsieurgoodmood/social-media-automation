@@ -9,10 +9,9 @@ def job():
     """Mise à jour quotidienne des données Facebook et purge des anciennes données."""
     process_data()
     update_page_metrics()
-    purge_old_data()  # Purger les données au-delà de 30 jours
-    print("Mise à jour des données et purge effectuée.")
+    purge_old_data()
 
-# Planification quotidienne
+# Planification quotidienne à 10h00
 schedule.every().day.at("10:00").do(job)
 
 while True:

@@ -1,2 +1,3 @@
 # Ignore le dossier credentials
 credentials/
+facebook/config.py

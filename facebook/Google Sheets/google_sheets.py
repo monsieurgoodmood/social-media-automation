@@ -13,7 +13,7 @@ def get_google_sheets_client():
     # Chemin vers le fichier JSON des credentials
     creds_path = 'credentials/service_account_credentials.json'
 
-    # Charger les credentials
+    # Charger les credentAials
     creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
 
     # Autoriser l'application avec les credentials
