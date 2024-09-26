@@ -21,9 +21,9 @@ def get_facebook_posts():
 
 def get_post_insights(post_id):
     """Récupère les insights pour un post spécifique."""
-    insights_url = f"{BASE_URL}/{post_id}/insights"
+    insights_url = f"https://graph.facebook.com/v20.0/{post_id}/insights"
     params = {
-        'metric': 'post_impressions,post_engaged_users,post_reactions_by_type_total',
+        'metric': 'post_impressions_unique,post_impressions_organic,post_clicks,post_reactions_by_type_total',
         'access_token': ACCESS_TOKEN
     }
     response = requests.get(insights_url, params=params)
@@ -34,15 +34,49 @@ def get_post_insights(post_id):
         raise Exception(f"Error fetching insights: {response.status_code} - {response.text}")
 
 def get_page_metrics():
-    """Récupère les métriques globales de la page (abonnés, likes, etc.)."""
-    page_url = f"{BASE_URL}/{FACEBOOK_PAGE_ID}"
-    params = {
+    """Récupère les métriques globales de la page pour différentes périodes (journalière, hebdomadaire, sur 28 jours)."""
+    base_url = f"https://graph.facebook.com/v20.0/{FACEBOOK_PAGE_ID}/insights"
+    params = {'access_token': ACCESS_TOKEN}
+    
+    # Métriques à récupérer avec différentes périodes
+    metrics_list = [
+        'page_views_total',  # Visiteurs totaux
+        'page_views_logged_in_unique',  # Visiteurs uniques connectés
+        'page_impressions',  # Impressions
+    ]
+    
+    periods = ['day', 'week', 'days_28']
+    
+    metrics = {}
+
+    # Requête pour récupérer les fan_count et followers_count
+    fan_follower_url = f"{BASE_URL}/{FACEBOOK_PAGE_ID}"
+    fan_follower_params = {
         'access_token': ACCESS_TOKEN,
         'fields': 'fan_count,followers_count'
     }
-    response = requests.get(page_url, params=params)
+    fan_follower_response = requests.get(fan_follower_url, params=fan_follower_params)
     
-    if response.status_code == 200:
-        return response.json()
+    if fan_follower_response.status_code == 200:
+        fan_follower_data = fan_follower_response.json()
+        metrics['fan_count'] = fan_follower_data.get('fan_count', 'N/A')
+        metrics['followers_count'] = fan_follower_data.get('followers_count', 'N/A')
     else:
-        raise Exception(f"Error fetching page metrics: {response.status_code} - {response.text}")
+        print(f"Error fetching fan/follower count: {fan_follower_response.status_code} - {fan_follower_response.text}")
+        metrics['fan_count'] = 'N/A'
+        metrics['followers_count'] = 'N/A'
+
+    # Requête pour les autres métriques sur les périodes temporelles
+    for metric in metrics_list:
+        for period in periods:
+            response = requests.get(base_url, params={**params, 'metric': metric, 'period': period})
+            if response.status_code == 200:
+                data = response.json().get('data', [])
+                if data:
+                    # Ajouter la métrique et la période dans les résultats
+                    metrics[f'{metric}_{period}'] = data[0]['values'][0]['value']
+            else:
+                print(f"Error fetching {metric} for period {period}: {response.status_code} - {response.text}")
+                metrics[f'{metric}_{period}'] = 'N/A'
+
+    return metrics
