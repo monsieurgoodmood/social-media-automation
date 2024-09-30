@@ -3,16 +3,28 @@
 import schedule
 import time
 from main import process_data, update_page_metrics
-from db_operations import purge_old_data
+from facebook_api import refresh_access_token
 
 def job():
-    """Mise à jour quotidienne des données Facebook et purge des anciennes données."""
+    """Mise à jour quotidienne des données Facebook et nettoyage des anciennes données."""
     process_data()
     update_page_metrics()
-    purge_old_data()
+    print("Mise à jour des données Facebook effectuée.")
 
-# Planification quotidienne à 10h00
+def token_refresh_job():
+    """Vérifie et met à jour le token d'accès si nécessaire."""
+    try:
+        new_token = refresh_access_token()
+        if new_token:
+            print("Token d'accès mis à jour.")
+    except Exception as e:
+        print(f"Erreur lors de la mise à jour du token: {e}")
+
+# Planification quotidienne à 10h
 schedule.every().day.at("10:00").do(job)
+
+# Rafraîchir le token toutes les semaines
+schedule.every().week.do(token_refresh_job)
 
 while True:
     schedule.run_pending()
