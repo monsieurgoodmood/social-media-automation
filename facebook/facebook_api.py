@@ -1,8 +1,10 @@
+# facebook_api
+
 import requests
 from config import ACCESS_TOKEN, API_VERSION, FACEBOOK_PAGE_ID, CLIENT_ID, CLIENT_SECRET
 
 def refresh_access_token():
-    """Rafraîchit le token d'accès pour obtenir un nouveau long-lived token"""
+    """Rafraîchit le token d'accès pour obtenir un nouveau token longue durée."""
     refresh_url = f"https://graph.facebook.com/{API_VERSION}/oauth/access_token"
     params = {
         'grant_type': 'fb_exchange_token',
@@ -18,7 +20,7 @@ def refresh_access_token():
         new_access_token = data.get('access_token', None)
         if new_access_token:
             # Mettre à jour le token dans le fichier config.py ou une autre source sécurisée
-            print("Nouveau token: ", new_access_token)
+            print("Nouveau token obtenu: ", new_access_token)
             return new_access_token
     else:
         raise Exception(f"Erreur lors du rafraîchissement du token: {response.status_code} - {response.text}")

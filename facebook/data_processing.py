@@ -3,8 +3,9 @@
 import csv
 import os
 import pandas as pd
-from config import FACEBOOK_PAGE_ID
+from config import FACEBOOK_PAGE_ID, GOOGLE_SHEET_NAME_POSTS, GOOGLE_SHEET_NAME_PAGES
 from facebook_api import get_facebook_posts, get_post_insights, get_page_metrics
+from google_sheets import upload_to_google_sheets
 
 def identify_post_type(attachments):
     """Identifie le type de post (texte, image, vidéo, etc.)."""
@@ -37,8 +38,8 @@ def calculate_total_reactions(reactions_dict):
         return sum(reactions_dict.values())
     return 0
 
-def append_to_csv(data, filename='facebook_post_insights.csv'):
-    """Ajoute des données dans un fichier CSV en gérant les sauts de ligne, les guillemets, et la suppression des anciennes données."""
+def append_to_csv(data, filename, google_sheet_name):
+    """Ajoute des données dans un fichier CSV et les met à jour dans la feuille Google Sheets."""
     folder_path = os.path.join(os.path.dirname(__file__), 'data')
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
@@ -51,30 +52,22 @@ def append_to_csv(data, filename='facebook_post_insights.csv'):
     else:
         df = pd.DataFrame()
 
-    # Vérifiez que la colonne 'Created Time' existe avant d'effectuer des opérations dessus
+    # Gestion des données pour les deux types de fichiers
     if filename == 'facebook_post_insights.csv':
         new_data = pd.DataFrame(data)
-        new_data['Created Time'] = pd.to_datetime(new_data['Created Time'], errors='coerce')  # Conversion en datetime
-        
-        # Si la colonne existe déjà, la convertir en datetime
+        new_data['Created Time'] = pd.to_datetime(new_data['Created Time'], errors='coerce')
+
         if not df.empty and 'Created Time' in df.columns:
             df['Created Time'] = pd.to_datetime(df['Created Time'], errors='coerce')
-        else:
-            df['Created Time'] = pd.to_datetime(df.get('Created Time', pd.NaT), errors='coerce')
-
-        # Garder les données des 40 derniers jours seulement si la colonne existe
         if 'Created Time' in df.columns:
             cutoff_date = pd.Timestamp.now() - pd.DateOffset(days=40)
             df = df[df['Created Time'] >= cutoff_date]
-        
     elif filename == 'facebook_page_metrics.csv':
         new_data = pd.DataFrame(data)
-        new_data['Date'] = pd.to_datetime(new_data['Date'], errors='coerce')  # Conversion en datetime
-        
+        new_data['Date'] = pd.to_datetime(new_data['Date'], errors='coerce')
+
         if not df.empty and 'Date' in df.columns:
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-        
-        # Garder les données des 40 derniers jours seulement si la colonne existe
         if 'Date' in df.columns:
             cutoff_date = pd.Timestamp.now() - pd.DateOffset(days=40)
             df = df[df['Date'] >= cutoff_date]
@@ -84,10 +77,20 @@ def append_to_csv(data, filename='facebook_post_insights.csv'):
     # Combiner les anciennes et les nouvelles données
     df = pd.concat([df, new_data], ignore_index=True)
 
+    # Convertir les colonnes 'Created Time' et 'Date' en chaînes de caractères si elles existent
+    if 'Created Time' in df.columns:
+        df['Created Time'] = df['Created Time'].astype(str)
+    if 'Date' in df.columns:
+        df['Date'] = df['Date'].astype(str)
+
     # Écrire les données mises à jour dans le fichier CSV
     df.to_csv(file_path, index=False, quoting=csv.QUOTE_ALL)
 
-    print(f"Données mises à jour et sauvegardées dans {file_path}")
+    # Upload vers Google Sheets dans la feuille correspondante
+    upload_to_google_sheets(df, google_sheet_name)
+
+    print(f"Données mises à jour et sauvegardées dans {file_path} et Google Sheets '{google_sheet_name}'.")
+
 
 def process_data():
     """Traite et stocke les données des posts Facebook."""
@@ -142,12 +145,12 @@ def process_data():
 
         all_post_insights.append(post_data)
 
-    # Appel à la fonction pour écrire les données dans le CSV
-    append_to_csv(all_post_insights)
+    # Appel pour écrire les données dans le fichier CSV et dans Google Sheets
+    append_to_csv(all_post_insights, 'facebook_post_insights.csv', GOOGLE_SHEET_NAME_POSTS)
 
 
 def update_page_metrics():
-    """Récupère et sauvegarde les métriques globales de la page."""
+    """Récupère et sauvegarde les métriques globales de la page dans Google Sheets."""
     metrics = get_page_metrics()
     page_data = {
         'Date': pd.Timestamp.now(),
@@ -163,8 +166,9 @@ def update_page_metrics():
         'Impressions (Semaine)': metrics.get('page_impressions_week', 0),
         'Impressions (28 Jours)': metrics.get('page_impressions_days_28', 0)
     }
-    append_to_csv([page_data], filename='facebook_page_metrics.csv')
-
+    
+    # Appel pour écrire les données dans le fichier CSV et dans Google Sheets
+    append_to_csv([page_data], 'facebook_page_metrics.csv', GOOGLE_SHEET_NAME_PAGES)
 
 def clean_text(text):
     """Nettoie le texte pour supprimer les sauts de ligne et espaces multiples."""

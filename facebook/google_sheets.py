@@ -1,47 +1,37 @@
+# google_sheets.py
+
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
 import os
-import csv
+from config import GOOGLE_CREDENTIALS_JSON, GOOGLE_SHEET_NAME_POSTS, GOOGLE_SHEET_NAME_PAGES
+
 
 def get_google_sheets_client():
     """Initialise et retourne un client Google Sheets autorisé."""
-    # Scopes nécessaires pour accéder à Google Sheets et Drive
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-    # Chemin vers le fichier JSON des credentials
-    creds_path = 'credentials/service_account_credentials.json'  # Assurez-vous que ce chemin est correct
-
-    # Charger les credentials
-    creds = ServiceAccountCredentials.from_json_keyfile_name(creds_path, scope)
-
-    # Autoriser l'application avec les credentials
+    creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_CREDENTIALS_JSON, scope)
     client = gspread.authorize(creds)
     return client
 
-def upload_to_google_sheets(csv_file, sheet_name):
-    """Upload les données CSV dans une feuille Google Sheets."""
+def upload_to_google_sheets(data, sheet_name):
+    """Upload les données dans la feuille Google Sheets spécifiée."""
     client = get_google_sheets_client()
-    
+
     try:
-        # Ouvrir le Google Sheet par son nom
         sheet = client.open(sheet_name).sheet1
     except gspread.SpreadsheetNotFound:
         print(f"Erreur: La feuille '{sheet_name}' n'a pas été trouvée.")
         return
 
-    # Vérifier si le fichier CSV existe avant l'upload
-    if not os.path.exists(csv_file):
-        print(f"Erreur: Le fichier {csv_file} n'existe pas.")
-        return
+    # Supprime toutes les données avant l'upload
+    sheet.clear()
 
-    # Lire le fichier CSV et uploader les données dans Google Sheets
-    with open(csv_file, 'r', encoding='utf-8') as file:
-        reader = csv.reader(file)
-        rows = list(reader)  # Charger toutes les lignes
+    # Convertir les données en format de liste pour Google Sheets
+    if isinstance(data, pd.DataFrame):
+        data = [data.columns.values.tolist()] + data.values.tolist()
 
-    # Insérer les lignes dans Google Sheets
-    for i, row in enumerate(rows):
-        if row:  # Éviter les lignes vides
-            sheet.insert_row(row, i + 1)
+    for i, row in enumerate(data):
+        sheet.insert_row(row, i + 1)
 
-    print("Upload terminé.")
+    print(f"Upload terminé dans la feuille '{sheet_name}'.")

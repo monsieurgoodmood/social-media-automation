@@ -1,6 +1,7 @@
-requests
+Flask
 pandas
 gspread
 oauth2client
+requests
 schedule
-mysql-connector-python
+gunicorn
