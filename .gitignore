@@ -1,3 +1,5 @@
 # Ignore le dossier credentials
 credentials/
 facebook/config.py
+data/
+access_token.txt

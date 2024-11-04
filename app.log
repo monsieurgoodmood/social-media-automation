@@ -1,0 +1,90 @@
+2024-10-03 15:21:59,234 - INFO - Lancement des tâches en arrière-plan.
+2024-10-03 15:21:59,235 - INFO - Début du traitement des données (posts et métriques de page).
+2024-10-03 15:21:59,235 - INFO - Début du traitement des posts Facebook.
+2024-10-03 15:21:59,242 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.26.17.30:8080
+2024-10-03 15:21:59,242 - INFO - [33mPress CTRL+C to quit[0m
+2024-10-03 15:22:00,489 - INFO - Traitement du post ID: 814743708622327_941948824609475
+2024-10-03 15:22:00,994 - INFO - Traitement du post ID: 814743708622327_916708740466817
+2024-10-03 15:22:01,671 - INFO - Traitement du post ID: 814743708622327_873179504819741
+2024-10-03 15:22:02,336 - INFO - Traitement du post ID: 814743708622327_849298593874499
+2024-10-03 15:22:02,958 - INFO - Traitement du post ID: 814743708622327_833501958787496
+2024-10-03 15:22:03,579 - INFO - Traitement du post ID: 814743708622327_814985313972494
+2024-10-03 15:22:04,301 - INFO - Traitement du post ID: 814743708622327_812290904241935
+2024-10-03 15:22:04,958 - INFO - Traitement du post ID: 814743708622327_805752441562448
+2024-10-03 15:22:05,612 - INFO - Traitement du post ID: 814743708622327_713001307504229
+2024-10-03 15:22:06,261 - INFO - Traitement du post ID: 814743708622327_700245338779826
+2024-10-03 15:22:07,333 - INFO - Traitement du post ID: 814743708622327_687658446705182
+2024-10-03 15:22:08,002 - INFO - Traitement du post ID: 814743708622327_681387150665645
+2024-10-03 15:22:08,514 - INFO - Traitement du post ID: 814743708622327_628569869280707
+2024-10-03 15:22:09,245 - INFO - Traitement du post ID: 814743708622327_578573040947057
+2024-10-03 15:22:09,945 - INFO - Traitement du post ID: 814743708622327_552231506914544
+2024-10-03 15:22:10,566 - INFO - Traitement du post ID: 814743708622327_511171994353829
+2024-10-03 15:22:12,116 - INFO - Traitement du post ID: 814743708622327_508549834616045
+2024-10-03 15:22:12,817 - INFO - Traitement du post ID: 814743708622327_504387625032266
+2024-10-03 15:22:13,773 - INFO - Traitement du post ID: 814743708622327_5193280437435277
+2024-10-03 15:22:14,361 - INFO - Traitement du post ID: 814743708622327_5003454819751174
+2024-10-03 15:22:14,938 - INFO - Traitement du post ID: 814743708622327_4941389672624356
+2024-10-03 15:22:15,507 - INFO - Traitement du post ID: 814743708622327_4796692140427444
+2024-10-03 15:22:16,174 - INFO - Traitement du post ID: 814743708622327_4675192039244122
+2024-10-03 15:22:16,685 - INFO - Traitement du post ID: 814743708622327_4655880031175323
+2024-10-03 15:22:17,318 - INFO - Traitement du post ID: 814743708622327_4588075311289129
+2024-10-03 15:22:18,025 - INFO - 25 posts traités avec succès.
+2024-10-03 15:22:18,094 - INFO - Client Google Sheets initialisé avec succès.
+2024-10-03 15:22:21,641 - INFO - Les anciennes données de l'onglet 'sheet1' ont été supprimées.
+2024-10-03 15:22:22,413 - INFO - Upload terminé dans l'onglet 'sheet1' de la feuille 'facebook_post_insights'.
+2024-10-03 15:22:22,414 - INFO - Upload terminé avec succès sur Google Sheet 'facebook_post_insights'.
+2024-10-03 15:22:22,415 - INFO - Début du traitement des métriques de la page Facebook.
+2024-10-03 15:22:32,140 - INFO - Métriques de la page récupérées: {'fan_count': 137, 'followers_count': 151, 'page_impressions_day': 1, 'page_impressions_week': 43, 'page_impressions_days_28': 201, 'page_impressions_paid_day': 0, 'page_impressions_paid_week': 0, 'page_impressions_paid_days_28': 0, 'page_impressions_viral_day': 1, 'page_impressions_viral_week': 18, 'page_impressions_viral_days_28': 56, 'page_impressions_unique_day': 1, 'page_impressions_unique_week': 14, 'page_impressions_unique_days_28': 33, 'page_total_actions_day': 0, 'page_total_actions_week': 0, 'page_total_actions_days_28': 0, 'page_fan_adds_day': 0, 'page_fan_adds_week': 0, 'page_fan_adds_days_28': 0, 'page_fan_removes_day': 0, 'page_fan_removes_week': 0, 'page_fan_removes_days_28': 0, 'page_views_total_day': 1, 'page_views_total_week': 4, 'page_views_total_days_28': 36, 'page_video_views_day': 0, 'page_video_views_week': 2, 'page_video_views_days_28': 9}
+2024-10-03 15:22:32,158 - INFO - Client Google Sheets initialisé avec succès.
+2024-10-03 15:22:34,703 - INFO - Les anciennes données de l'onglet 'sheet1' ont été supprimées.
+2024-10-03 15:22:35,551 - INFO - Upload terminé dans l'onglet 'sheet1' de la feuille 'facebook_page_insights'.
+2024-10-03 15:22:35,552 - INFO - Les métriques de la page ont été sauvegardées avec succès dans le fichier CSV.
+2024-10-03 15:22:35,553 - INFO - Les données ont été traitées avec succès.
+2024-10-03 15:25:25,155 - INFO - Lancement des tâches en arrière-plan.
+2024-10-03 15:25:25,155 - INFO - Début du traitement des données (posts et métriques de page).
+2024-10-03 15:25:25,155 - INFO - Début du traitement des posts Facebook.
+2024-10-03 15:25:25,161 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.26.17.30:8080
+2024-10-03 15:25:25,161 - INFO - [33mPress CTRL+C to quit[0m
+2024-10-03 15:25:26,887 - INFO - Traitement du post ID: 814743708622327_941948824609475
+2024-10-03 15:25:37,593 - INFO - Traitement du post ID: 814743708622327_916708740466817
+2024-10-03 15:25:38,158 - INFO - Traitement du post ID: 814743708622327_873179504819741
+2024-10-03 15:25:38,654 - INFO - Traitement du post ID: 814743708622327_849298593874499
+2024-10-03 15:25:39,580 - INFO - Traitement du post ID: 814743708622327_833501958787496
+2024-10-03 15:25:40,072 - INFO - Traitement du post ID: 814743708622327_814985313972494
+2024-10-03 15:25:40,953 - INFO - Traitement du post ID: 814743708622327_812290904241935
+2024-10-03 15:25:41,464 - INFO - Traitement du post ID: 814743708622327_805752441562448
+2024-10-03 15:25:41,924 - INFO - Traitement du post ID: 814743708622327_713001307504229
+2024-10-03 15:25:42,426 - INFO - Traitement du post ID: 814743708622327_700245338779826
+2024-10-03 15:25:43,001 - INFO - Traitement du post ID: 814743708622327_687658446705182
+2024-10-03 15:25:43,579 - INFO - Traitement du post ID: 814743708622327_681387150665645
+2024-10-03 15:25:44,244 - INFO - Traitement du post ID: 814743708622327_628569869280707
+2024-10-03 15:25:44,907 - INFO - Traitement du post ID: 814743708622327_578573040947057
+2024-10-03 15:25:46,310 - INFO - Traitement du post ID: 814743708622327_552231506914544
+2024-10-03 15:25:46,848 - INFO - Traitement du post ID: 814743708622327_511171994353829
+2024-10-03 15:25:47,516 - INFO - Traitement du post ID: 814743708622327_508549834616045
+2024-10-03 15:25:48,187 - INFO - Traitement du post ID: 814743708622327_504387625032266
+2024-10-03 15:25:48,904 - INFO - Traitement du post ID: 814743708622327_5193280437435277
+2024-10-03 15:25:49,558 - INFO - Traitement du post ID: 814743708622327_5003454819751174
+2024-10-03 15:25:50,179 - INFO - Traitement du post ID: 814743708622327_4941389672624356
+2024-10-03 15:25:51,195 - INFO - Traitement du post ID: 814743708622327_4796692140427444
+2024-10-03 15:25:51,702 - INFO - Traitement du post ID: 814743708622327_4675192039244122
+2024-10-03 15:25:52,212 - INFO - Traitement du post ID: 814743708622327_4655880031175323
+2024-10-03 15:25:52,720 - INFO - Traitement du post ID: 814743708622327_4588075311289129
+2024-10-03 15:25:53,166 - INFO - 25 posts traités avec succès.
+2024-10-03 15:25:53,194 - INFO - Client Google Sheets initialisé avec succès.
+2024-10-03 15:25:57,626 - INFO - Les anciennes données de l'onglet 'sheet1' ont été supprimées.
+2024-10-03 15:25:58,393 - INFO - Upload terminé dans l'onglet 'sheet1' de la feuille 'facebook_post_insights'.
+2024-10-03 15:25:58,394 - INFO - Upload terminé avec succès sur Google Sheet 'facebook_post_insights'.
+2024-10-03 15:25:58,394 - INFO - Début du traitement des métriques de la page Facebook.
+2024-10-03 15:26:10,514 - INFO - Métriques de la page récupérées: {'fan_count': 137, 'followers_count': 151, 'page_impressions_day': 1, 'page_impressions_week': 43, 'page_impressions_days_28': 201, 'page_impressions_paid_day': 0, 'page_impressions_paid_week': 0, 'page_impressions_paid_days_28': 0, 'page_impressions_viral_day': 1, 'page_impressions_viral_week': 18, 'page_impressions_viral_days_28': 56, 'page_impressions_unique_day': 1, 'page_impressions_unique_week': 14, 'page_impressions_unique_days_28': 33, 'page_total_actions_day': 0, 'page_total_actions_week': 0, 'page_total_actions_days_28': 0, 'page_fan_adds_day': 0, 'page_fan_adds_week': 0, 'page_fan_adds_days_28': 0, 'page_fan_removes_day': 0, 'page_fan_removes_week': 0, 'page_fan_removes_days_28': 0, 'page_views_total_day': 1, 'page_views_total_week': 4, 'page_views_total_days_28': 36, 'page_video_views_day': 0, 'page_video_views_week': 2, 'page_video_views_days_28': 9}
+2024-10-03 15:26:10,522 - INFO - Client Google Sheets initialisé avec succès.
+2024-10-03 15:26:13,506 - INFO - Les anciennes données de l'onglet 'sheet1' ont été supprimées.
+2024-10-03 15:26:14,317 - INFO - Upload terminé dans l'onglet 'sheet1' de la feuille 'facebook_page_insights'.
+2024-10-03 15:26:14,317 - INFO - Les métriques de la page ont été sauvegardées avec succès dans le fichier CSV.
+2024-10-03 15:26:14,317 - INFO - Les données ont été traitées avec succès.

@@ -2,30 +2,37 @@
 
 import schedule
 import time
-from main import process_data, update_page_metrics
+import threading
+import logging
+from post_metrics_processing import process_post_data
 from facebook_api import refresh_access_token
 
+logging.basicConfig(filename='scheduler.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 def job():
-    """Mise à jour quotidienne des données Facebook et nettoyage des anciennes données."""
-    process_data()
-    update_page_metrics()
-    print("Mise à jour des données Facebook effectuée.")
+    """Tâche quotidienne pour mettre à jour les données des posts."""
+    try:
+        logging.info("Début de la mise à jour quotidienne des posts.")
+        process_post_data()  # Mise à jour des posts
+        logging.info("Mise à jour quotidienne terminée.")
+    except Exception as e:
+        logging.error(f"Erreur dans la tâche quotidienne : {e}")
 
 def token_refresh_job():
-    """Vérifie et met à jour le token d'accès si nécessaire."""
+    """Rafraîchit le token d'accès de manière hebdomadaire."""
     try:
         new_token = refresh_access_token()
         if new_token:
-            print("Token d'accès mis à jour.")
+            logging.info("Token d'accès rafraîchi avec succès.")
     except Exception as e:
-        print(f"Erreur lors de la mise à jour du token: {e}")
+        logging.error(f"Erreur de rafraîchissement du token : {e}")
 
-# Planification quotidienne à 10h
+# Planification des tâches
 schedule.every().day.at("10:00").do(job)
-
-# Rafraîchir le token toutes les semaines
 schedule.every().week.do(token_refresh_job)
 
-while True:
-    schedule.run_pending()
-    time.sleep(1)
+if __name__ == "__main__":
+    logging.info("Démarrage du scheduler.")
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
