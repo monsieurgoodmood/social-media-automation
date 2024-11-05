@@ -5,6 +5,7 @@ from flask import Flask, jsonify
 import os
 from post_metrics_processing import process_post_data
 from page_metrics_processing import process_page_metrics
+from page_summary_processing import process_page_summary  # Ajouter cette ligne
 import threading
 
 app = Flask(__name__)
@@ -42,6 +43,7 @@ def data_processing_task():
     try:
         process_post_data()
         process_page_metrics()
+        process_page_summary()  # Ajouter cette ligne pour inclure le résumé
         status['data_processing'] = 'success'
         logger.info("Les données ont été traitées avec succès.")
     except Exception as e:

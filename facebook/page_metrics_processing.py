@@ -1,5 +1,6 @@
 # page_metrics_processing.py
 
+import os  # Ajoutez ceci au début
 import logging
 from config import GOOGLE_SHEET_NAME_PAGES
 from facebook_api import get_page_insights
@@ -8,27 +9,34 @@ from datetime import datetime
 import pandas as pd
 import re
 
+
 logger = logging.getLogger(__name__)
 
 def process_page_metrics():
-    """Traite les métriques de la page Facebook en supprimant les doublons de colonne Date."""
+    """Traite les métriques de la page Facebook en ajoutant la colonne Date et en supprimant les doublons."""
     logger.info("Début du traitement des métriques de la page.")
     try:
         page_metrics = get_page_insights()
         if page_metrics:
-            # Ajouter la date uniquement dans la première colonne "Date"
+            # Ajouter la date pour les calculs
             page_metrics['Date'] = datetime.now().strftime('%Y-%m-%d')
             
-            # Créer le DataFrame
+            # Créer le DataFrame avec la colonne Date
             df = pd.DataFrame([page_metrics])
             
-            # Vérifier si la dernière colonne contient une date au format YYYY-MM-DD
-            last_column_value = df.iloc[0, -1]  # Récupérer la dernière valeur de la première ligne
-            if isinstance(last_column_value, str) and re.match(r"\d{4}-\d{2}-\d{2}", last_column_value):
-                df = df.iloc[:, :-1]  # Supprimer la dernière colonne si elle contient une date
+            # Charger l'historique existant ou créer un DataFrame vide
+            insights_file_path = '/home/arthur/code/social-media-automation/facebook/data/facebook_page_insights.csv'
+            historical_df = pd.read_csv(insights_file_path) if os.path.exists(insights_file_path) else pd.DataFrame(columns=df.columns)
+            
+            # Concaténer les nouvelles données avec l'historique
+            updated_df = pd.concat([historical_df, df], ignore_index=True)
+            
+            # Sauvegarder en CSV
+            updated_df.to_csv(insights_file_path, index=False)
+            logger.info("Données sauvegardées dans le CSV local avec la colonne Date.")
 
-            # Utiliser save_and_upload pour sauvegarder et uploader sans la colonne dupliquée
-            save_and_upload(df.to_dict(orient="records"), 'facebook_page_metrics.csv', GOOGLE_SHEET_NAME_PAGES, "Agence RSP")
+            # Exclure la colonne Date pour l'upload
+            save_and_upload(df.drop(columns=['Date']).to_dict(orient="records"), "facebook_page_insights.csv", GOOGLE_SHEET_NAME_PAGES, "Agence RSP", exclude_date_in_sheet=True)
             logger.info("Les métriques de la page ont été traitées et enregistrées sans doublons.")
     except Exception as e:
         logger.error(f"Erreur lors du traitement des métriques de la page : {e}")
