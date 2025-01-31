@@ -6,10 +6,12 @@ import csv
 import os
 import logging
 from metrics import POST_METRICS  # Assurez-vous que metrics.py définit POST_METRICS
+import json
 
 
 logger = logging.getLogger(__name__)
 
+# Fonction à appliquer dans les données avant l'upload
 def convert_to_json_compatible(value):
     """Convertit les types numpy et pandas en types natifs Python pour compatibilité JSON."""
     if isinstance(value, (np.integer, int)):
@@ -20,12 +22,13 @@ def convert_to_json_compatible(value):
         return bool(value)
     elif pd.isna(value):
         return None
-    return value
+    return str(value)  # Dernier recours : convertir en chaîne
+
 
 def clean_data_for_json(df):
     """Remplace les valeurs non conformes (NaN, inf, -inf) dans le DataFrame pour compatibilité JSON."""
     df = df.replace([np.inf, -np.inf], None)  # Remplace inf et -inf par None
-    df = df.fillna(0)  # Remplace NaN par 0, ou utilisez None si vous préférez
+    df = df.fillna(0)  # Rempl/home/arthur/code/social-media-automation/linkedinace NaN par 0, ou utilisez None si vous préférez
     return df
 
 def generate_title(post):
@@ -33,35 +36,23 @@ def generate_title(post):
     message = post.get('message', '')
     return message[:10] + "..." if message else "Post"
 
-def save_and_upload(data, filename, google_sheet_name, tab_name, exclude_date_in_sheet=False):
-    """Sauvegarde les données dans un fichier CSV et les télécharge sur Google Sheets.
-    
-    Args:
-        data (list): Les données à sauvegarder et uploader.
-        filename (str): Nom du fichier CSV pour sauvegarder localement.
-        google_sheet_name (str): Nom de la feuille Google Sheets.
-        tab_name (str): Nom de l'onglet de la feuille Google Sheets.
-        exclude_date_in_sheet (bool): Si True, supprime la colonne 'Date' pour l'upload vers Google Sheets.
-    """
-    folder_path = os.path.join(os.path.dirname(__file__), 'data')
-    os.makedirs(folder_path, exist_ok=True)
-    file_path = os.path.join(folder_path, filename)
-
-    # Crée le DataFrame et le sauvegarde en CSV
-    df = pd.DataFrame(data)
-    df.to_csv(file_path, index=False, quoting=csv.QUOTE_ALL)
-
-    # Si exclude_date_in_sheet est True, on retire la colonne 'Date' avant l'upload vers Google Sheets
-    if exclude_date_in_sheet and 'Date' in df.columns:
-        df = df.drop(columns=['Date'])
-
-    # Upload vers Google Sheets
-    from google_sheets import upload_to_google_sheets
+def save_and_upload(data, filename, sheet_name, tab_name, exclude_date_in_sheet=False):
     try:
-        upload_to_google_sheets(df, google_sheet_name, tab_name)
-        logger.info(f"Upload vers Google Sheets '{google_sheet_name}', onglet '{tab_name}' terminé avec succès.")
+        # Conversion explicite des Timestamp en string
+        for col in data.columns:
+            if pd.api.types.is_datetime64_any_dtype(data[col]):
+                data[col] = data[col].dt.strftime('%Y-%m-%d')
+                
+        data_records = data.to_dict(orient="records")
+        try:
+            json.dumps(data_records)  # Vérifie si la sérialisation fonctionne
+        except TypeError as e:
+            logger.error(f"Erreur de sérialisation JSON : {e}")
+            return
+        ...
     except Exception as e:
         logger.error(f"Erreur lors de l'upload vers Google Sheets : {e}")
+        raise
 
 
 def calculate_metrics(row):
@@ -81,3 +72,27 @@ def calculate_metrics(row):
     
     return row
 
+def normalize_metrics(df, expected_metrics):
+    """
+    Normalise le DataFrame pour inclure toutes les métriques attendues, même si elles sont manquantes,
+    en les remplissant avec des valeurs par défaut (zéros).
+    
+    Args:
+        df (pd.DataFrame): DataFrame contenant les données actuelles.
+        expected_metrics (list): Liste des métriques attendues.
+    
+    Returns:
+        pd.DataFrame: DataFrame normalisé.
+    """
+    # Vérifiez si toutes les métriques attendues sont présentes
+    missing_metrics = [metric for metric in expected_metrics if metric not in df.columns]
+    
+    if missing_metrics:
+        for metric in missing_metrics:
+            df[metric] = 0  # Ajoutez une colonne pour les métriques manquantes avec des valeurs par défaut
+
+    # Réorganisez les colonnes pour correspondre à l'ordre attendu
+    ordered_columns = ["Date"] + expected_metrics
+    df = df.reindex(columns=ordered_columns, fill_value=0)
+
+    return df
