@@ -3,3 +3,12 @@ credentials/
 facebook/config.py
 data/
 access_token.txt
+facebook_api/multi_pages_metrics.py/fb_access_token.json
+facebook_api/multi_pages_metrics.py/list_pages.txt
+facebook_api/multi_pages_metrics.py/.env
+facebook_api/daily_page_metrics_1.py
+facebook_api/daily_page_metrics.py
+facebook/
+facebook_api/
+facebook_saas/
+linkedin/
