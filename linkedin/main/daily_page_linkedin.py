@@ -157,15 +157,41 @@ class LinkedInDailyPageStatisticsTracker:
             careers_views = views.get('careersPageViews', {}).get('pageViews', 0)
             unique_careers_views = views.get('careersPageViews', {}).get('uniquePageViews', 0)
             
+            # Nouveaux champs extraits de la documentation
+            desktop_careers_views = views.get('desktopCareersPageViews', {}).get('pageViews', 0)
+            desktop_jobs_views = views.get('desktopJobsPageViews', {}).get('pageViews', 0)
+            desktop_overview_views = views.get('desktopOverviewPageViews', {}).get('pageViews', 0)
+            desktop_life_at_views = views.get('desktopLifeAtPageViews', {}).get('pageViews', 0)
+            
+            mobile_careers_views = views.get('mobileCareersPageViews', {}).get('pageViews', 0)
+            mobile_jobs_views = views.get('mobileJobsPageViews', {}).get('pageViews', 0)
+            mobile_overview_views = views.get('mobileOverviewPageViews', {}).get('pageViews', 0)
+            mobile_life_at_views = views.get('mobileLifeAtPageViews', {}).get('pageViews', 0)
+            
+            life_at_views = views.get('lifeAtPageViews', {}).get('pageViews', 0)
+            unique_life_at_views = views.get('lifeAtPageViews', {}).get('uniquePageViews', 0)
+            
+            # Extraire les données des clics sur les boutons personnalisés
+            clicks = stats.get('clicks', {})
+            desktop_custom_button_clicks = clicks.get('desktopCustomButtonClickCounts', [])
+            mobile_custom_button_clicks = clicks.get('mobileCustomButtonClickCounts', [])
+            
+            # Calculer le total des clics sur les boutons personnalisés
+            desktop_button_clicks_total = sum([click.get('count', 0) for click in desktop_custom_button_clicks]) if desktop_custom_button_clicks else 0
+            mobile_button_clicks_total = sum([click.get('count', 0) for click in mobile_custom_button_clicks]) if mobile_custom_button_clicks else 0
+            
             # Stocker les données du jour
             day_stats = {
                 'date': date_str,
+                # Vue générales
                 'total_views': all_page_views,
                 'unique_views': unique_page_views,
+                # Vues desktop et mobile
                 'desktop_views': all_desktop_views,
                 'unique_desktop_views': unique_desktop_views,
                 'mobile_views': all_mobile_views,
                 'unique_mobile_views': unique_mobile_views,
+                # Vues par type de page
                 'overview_views': overview_views,
                 'unique_overview_views': unique_overview_views,
                 'about_views': about_views,
@@ -175,7 +201,22 @@ class LinkedInDailyPageStatisticsTracker:
                 'jobs_views': jobs_views,
                 'unique_jobs_views': unique_jobs_views,
                 'careers_views': careers_views,
-                'unique_careers_views': unique_careers_views
+                'unique_careers_views': unique_careers_views,
+                # Nouveaux champs détaillés
+                'desktop_careers_views': desktop_careers_views,
+                'desktop_jobs_views': desktop_jobs_views,
+                'desktop_overview_views': desktop_overview_views,
+                'desktop_life_at_views': desktop_life_at_views,
+                'mobile_careers_views': mobile_careers_views,
+                'mobile_jobs_views': mobile_jobs_views,
+                'mobile_overview_views': mobile_overview_views,
+                'mobile_life_at_views': mobile_life_at_views,
+                'life_at_views': life_at_views,
+                'unique_life_at_views': unique_life_at_views,
+                # Clics sur les boutons personnalisés
+                'desktop_button_clicks': desktop_button_clicks_total,
+                'mobile_button_clicks': mobile_button_clicks_total,
+                'total_button_clicks': desktop_button_clicks_total + mobile_button_clicks_total
             }
             
             daily_stats.append(day_stats)
@@ -399,7 +440,11 @@ class LinkedInShareStatisticsTracker:
             comment_count = share_stats.get('commentCount', 0)
             share_count = share_stats.get('shareCount', 0)
             impression_count = share_stats.get('impressionCount', 0)
-            unique_impressions_count = share_stats.get('uniqueImpressionsCounts', 0)
+            unique_impressions_count = share_stats.get('uniqueImpressionsCount', 0)
+            
+            # Extraire les métriques additionnelles si disponibles
+            share_mentions_count = share_stats.get('shareMentionsCount', 0)
+            comment_mentions_count = share_stats.get('commentMentionsCount', 0)
             
             # Stocker les données du jour
             day_stats = {
@@ -410,7 +455,9 @@ class LinkedInShareStatisticsTracker:
                 'comment_count': comment_count,
                 'share_count': share_count,
                 'impression_count': impression_count,
-                'unique_impressions_count': unique_impressions_count
+                'unique_impressions_count': unique_impressions_count,
+                'share_mentions_count': share_mentions_count,
+                'comment_mentions_count': comment_mentions_count
             }
             
             daily_stats.append(day_stats)
@@ -569,6 +616,8 @@ class GoogleSheetsExporter:
             merged_stats[date]['share_count'] = 0
             merged_stats[date]['impression_count'] = 0
             merged_stats[date]['unique_impressions_count'] = 0
+            merged_stats[date]['share_mentions_count'] = 0
+            merged_stats[date]['comment_mentions_count'] = 0
         
         # Ensuite, ajouter ou mettre à jour avec les statistiques de followers
         for stat in follower_stats:
@@ -598,6 +647,19 @@ class GoogleSheetsExporter:
                     'unique_jobs_views': 0,
                     'careers_views': 0,
                     'unique_careers_views': 0,
+                    'desktop_careers_views': 0,
+                    'desktop_jobs_views': 0,
+                    'desktop_overview_views': 0,
+                    'desktop_life_at_views': 0,
+                    'mobile_careers_views': 0,
+                    'mobile_jobs_views': 0,
+                    'mobile_overview_views': 0,
+                    'mobile_life_at_views': 0,
+                    'life_at_views': 0,
+                    'unique_life_at_views': 0,
+                    'desktop_button_clicks': 0,
+                    'mobile_button_clicks': 0,
+                    'total_button_clicks': 0,
                     'organic_follower_gain': stat['organic_follower_gain'],
                     'paid_follower_gain': stat['paid_follower_gain'],
                     'total_follower_gain': stat['total_follower_gain'],
@@ -607,7 +669,9 @@ class GoogleSheetsExporter:
                     'comment_count': 0,
                     'share_count': 0,
                     'impression_count': 0,
-                    'unique_impressions_count': 0
+                    'unique_impressions_count': 0,
+                    'share_mentions_count': 0,
+                    'comment_mentions_count': 0
                 }
                 merged_stats[date] = new_entry
         
@@ -623,6 +687,9 @@ class GoogleSheetsExporter:
                 merged_stats[date]['share_count'] = stat['share_count']
                 merged_stats[date]['impression_count'] = stat['impression_count']
                 merged_stats[date]['unique_impressions_count'] = stat['unique_impressions_count']
+                # Ajout des nouveaux champs
+                merged_stats[date]['share_mentions_count'] = stat.get('share_mentions_count', 0)
+                merged_stats[date]['comment_mentions_count'] = stat.get('comment_mentions_count', 0)
             else:
                 # Créer une nouvelle entrée (avec des vues et followers à 0)
                 new_entry = {
@@ -643,6 +710,19 @@ class GoogleSheetsExporter:
                     'unique_jobs_views': 0,
                     'careers_views': 0,
                     'unique_careers_views': 0,
+                    'desktop_careers_views': 0,
+                    'desktop_jobs_views': 0,
+                    'desktop_overview_views': 0,
+                    'desktop_life_at_views': 0,
+                    'mobile_careers_views': 0,
+                    'mobile_jobs_views': 0,
+                    'mobile_overview_views': 0,
+                    'mobile_life_at_views': 0,
+                    'life_at_views': 0,
+                    'unique_life_at_views': 0,
+                    'desktop_button_clicks': 0,
+                    'mobile_button_clicks': 0,
+                    'total_button_clicks': 0,
                     'organic_follower_gain': 0,
                     'paid_follower_gain': 0,
                     'total_follower_gain': 0,
@@ -652,7 +732,9 @@ class GoogleSheetsExporter:
                     'comment_count': stat['comment_count'],
                     'share_count': stat['share_count'],
                     'impression_count': stat['impression_count'],
-                    'unique_impressions_count': stat['unique_impressions_count']
+                    'unique_impressions_count': stat['unique_impressions_count'],
+                    'share_mentions_count': stat.get('share_mentions_count', 0),
+                    'comment_mentions_count': stat.get('comment_mentions_count', 0)
                 }
                 merged_stats[date] = new_entry
         
@@ -682,7 +764,7 @@ class GoogleSheetsExporter:
                         self.spreadsheet.add_worksheet, 
                         title="Statistiques quotidiennes", 
                         rows=500, 
-                        cols=30  # Augmentation du nombre de colonnes
+                        cols=50  # Augmentation du nombre de colonnes pour les nouvelles métriques
                     )
                     print("Nouvelle feuille 'Statistiques quotidiennes' créée")
             
@@ -692,36 +774,71 @@ class GoogleSheetsExporter:
             
             # Créer les en-têtes si nécessaire
             headers = [
-                "Date", 
-                # Vues de page
-                "Vues totales", 
-                "Vues uniques", 
-                "Vues Desktop", 
-                "Vues Desktop uniques", 
-                "Vues Mobile",
-                "Vues Mobile uniques",
-                "Vues Accueil", 
-                "Vues Accueil uniques",
-                "Vues À propos", 
-                "Vues À propos uniques",
-                "Vues Personnes", 
-                "Vues Personnes uniques",
-                "Vues Emplois", 
-                "Vues Emplois uniques",
-                "Vues Carrières", 
-                "Vues Carrières uniques",
-                # Followers
-                "Nouveaux followers organiques",
-                "Nouveaux followers payants",
-                "Total nouveaux followers",
-                # Partages
-                "Nombre de clics",
-                "Taux d'engagement",
-                "Nombre de likes",
-                "Nombre de commentaires",
-                "Nombre de partages",
-                "Nombre d'impressions",
-                "Nombre d'impressions uniques"
+                "Date",
+                
+                # --- Vues de page ---
+                # Vues générales
+                "Vues totales (allPageViews)", 
+                "Vues uniques (uniquePageViews)", 
+                
+                # Vues par appareil
+                "Vues Desktop (allDesktopPageViews)", 
+                "Vues Desktop uniques (uniqueDesktopPageViews)", 
+                "Vues Mobile (allMobilePageViews)",
+                "Vues Mobile uniques (uniqueMobilePageViews)",
+                
+                # Vues par section - Aperçu
+                "Vues Accueil (overviewPageViews)", 
+                "Vues Accueil uniques (uniqueOverviewPageViews)",
+                "Vues Accueil Desktop (desktopOverviewPageViews)",
+                "Vues Accueil Mobile (mobileOverviewPageViews)",
+                
+                # Vues par section - À propos
+                "Vues À propos (aboutPageViews)", 
+                "Vues À propos uniques (uniqueAboutPageViews)",
+                
+                # Vues par section - Personnes
+                "Vues Personnes (peoplePageViews)", 
+                "Vues Personnes uniques (uniquePeoplePageViews)",
+                
+                # Vues par section - Emplois
+                "Vues Emplois (jobsPageViews)", 
+                "Vues Emplois uniques (uniqueJobsPageViews)",
+                "Vues Emplois Desktop (desktopJobsPageViews)",
+                "Vues Emplois Mobile (mobileJobsPageViews)",
+                
+                # Vues par section - Carrières
+                "Vues Carrières (careersPageViews)", 
+                "Vues Carrières uniques (uniqueCareersPageViews)",
+                "Vues Carrières Desktop (desktopCareersPageViews)",
+                "Vues Carrières Mobile (mobileCareersPageViews)",
+                
+                # Vues par section - Vie en entreprise
+                "Vues Vie en entreprise (lifeAtPageViews)",
+                "Vues Vie en entreprise uniques (uniqueLifeAtPageViews)",
+                "Vues Vie en entreprise Desktop (desktopLifeAtPageViews)",
+                "Vues Vie en entreprise Mobile (mobileLifeAtPageViews)",
+                
+                # Clics sur boutons
+                "Clics sur boutons Desktop (desktopCustomButtonClickCounts)",
+                "Clics sur boutons Mobile (mobileCustomButtonClickCounts)",
+                "Total clics sur boutons",
+                
+                # --- Followers ---
+                "Nouveaux followers organiques (organicFollowerGain)",
+                "Nouveaux followers payants (paidFollowerGain)",
+                "Total nouveaux followers (totalFollowerGain)",
+                
+                # --- Partages ---
+                "Nombre de clics (clickCount)",
+                "Taux d'engagement (engagement)",
+                "Nombre de J'aime (likeCount)",
+                "Nombre de commentaires (commentCount)",
+                "Nombre de partages (shareCount)",
+                "Mentions dans partages (shareMentionsCount)",
+                "Mentions dans commentaires (commentMentionsCount)",
+                "Nombre d'impressions (impressionCount)",
+                "Nombre d'impressions uniques (uniqueImpressionsCount)"
             ]
             
             # S'assurer que la première ligne contient les en-têtes
@@ -778,33 +895,67 @@ class GoogleSheetsExporter:
                 # Préparation des données de ligne
                 row_data = [
                     date,
-                    # Vues de page
+                    
+                    # Vues générales
                     day_stats['total_views'],
                     day_stats['unique_views'],
+                    
+                    # Vues par appareil
                     day_stats['desktop_views'],
                     day_stats['unique_desktop_views'],
                     day_stats['mobile_views'],
                     day_stats['unique_mobile_views'],
+                    
+                    # Vues par section - Aperçu
                     day_stats['overview_views'],
                     day_stats['unique_overview_views'],
+                    day_stats['desktop_overview_views'],
+                    day_stats['mobile_overview_views'],
+                    
+                    # Vues par section - À propos
                     day_stats['about_views'],
                     day_stats['unique_about_views'],
+                    
+                    # Vues par section - Personnes
                     day_stats['people_views'],
                     day_stats['unique_people_views'],
+                    
+                    # Vues par section - Emplois
                     day_stats['jobs_views'],
                     day_stats['unique_jobs_views'],
+                    day_stats['desktop_jobs_views'],
+                    day_stats['mobile_jobs_views'],
+                    
+                    # Vues par section - Carrières
                     day_stats['careers_views'],
                     day_stats['unique_careers_views'],
+                    day_stats['desktop_careers_views'],
+                    day_stats['mobile_careers_views'],
+                    
+                    # Vues par section - Vie en entreprise
+                    day_stats['life_at_views'],
+                    day_stats['unique_life_at_views'],
+                    day_stats['desktop_life_at_views'],
+                    day_stats['mobile_life_at_views'],
+                    
+                    # Clics sur boutons
+                    day_stats['desktop_button_clicks'],
+                    day_stats['mobile_button_clicks'],
+                    day_stats['total_button_clicks'],
+                    
                     # Followers
                     day_stats['organic_follower_gain'],
                     day_stats['paid_follower_gain'],
                     day_stats['total_follower_gain'],
+                    
                     # Partages
                     day_stats['click_count'],
                     day_stats['engagement'],
                     day_stats['like_count'],
                     day_stats['comment_count'],
                     day_stats['share_count'],
+                    day_stats.get('share_mentions_count', 0),
+                    day_stats.get('comment_mentions_count', 0),
                     day_stats['impression_count'],
                     day_stats['unique_impressions_count']
                 ]

@@ -81,63 +81,185 @@ class LinkedInShareStatisticsTracker:
         print("Échec après plusieurs tentatives pour obtenir les statistiques de partage.")
         return None
     
-    def parse_share_statistics(self, data):
+    def get_page_statistics(self):
+        """Obtient les statistiques de la page pour l'organisation (métriques lifetime)"""
+        # Encoder l'URN de l'organisation
+        organization_urn = f"urn:li:organization:{self.organization_id}"
+        encoded_urn = urllib.parse.quote(organization_urn)
+        
+        # Construire l'URL
+        url = f"{self.base_url}/organizationPageStatistics?q=organization&organization={encoded_urn}"
+        
+        # Effectuer la requête avec gestion des erreurs et retry
+        max_retries = 3
+        retry_delay = 2  # secondes
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, headers=self.get_headers())
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"Données de statistiques lifetime de la page récupérées avec succès")
+                    return data
+                    
+                elif response.status_code == 429:
+                    # Rate limit, attendre avant de réessayer
+                    print(f"Rate limit atteint, attente de {retry_delay} secondes...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Backoff exponentiel
+                else:
+                    print(f"Erreur API: {response.status_code} - {response.text}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    
+            except Exception as e:
+                print(f"Exception lors de la requête: {e}")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+        
+        print("Échec après plusieurs tentatives pour obtenir les statistiques lifetime de la page.")
+        return None
+    
+    def parse_share_statistics(self, share_data, page_data=None):
         """Analyse les données de l'API et extrait les statistiques pertinentes"""
         stats = {}
         
         # Date de récupération
         stats['date'] = datetime.now().strftime('%Y-%m-%d')
         
-        # S'assurer que les données sont valides
-        if not data or 'elements' not in data or len(data['elements']) == 0:
-            print("Aucune donnée de statistiques valide trouvée.")
-            return stats
-        
-        # Obtenir le premier élément (qui contient les stats d'organisation)
-        element = data['elements'][0]
-        
-        if 'totalShareStatistics' not in element:
-            print("Aucune statistique de partage trouvée dans les données.")
-            return stats
-        
-        # Extraire les statistiques principales
-        share_stats = element['totalShareStatistics']
-        
-        stats['impressions'] = {
-            'total': share_stats.get('impressionCount', 0),
-            'unique': share_stats.get('uniqueImpressionsCount', 0)
-        }
-        
-        stats['engagement'] = {
-            'rate': share_stats.get('engagement', 0) * 100,  # Convertir en pourcentage
-            'clicks': share_stats.get('clickCount', 0),
-            'likes': share_stats.get('likeCount', 0),
-            'comments': share_stats.get('commentCount', 0),
-            'shares': share_stats.get('shareCount', 0),
-            'share_mentions': share_stats.get('shareMentionsCount', 0),
-            'comment_mentions': share_stats.get('commentMentionsCount', 0)
-        }
-        
-        # Calcul de métriques dérivées
-        if stats['impressions']['total'] > 0:
-            stats['engagement']['click_through_rate'] = (stats['engagement']['clicks'] / stats['impressions']['total']) * 100
+        # S'assurer que les données de partage sont valides
+        if not share_data or 'elements' not in share_data or len(share_data['elements']) == 0:
+            print("Aucune donnée de statistiques de partage valide trouvée.")
+            # Initialiser avec des valeurs par défaut
+            stats['impressions'] = {'total': 0, 'unique': 0}
+            stats['engagement'] = {
+                'rate': 0,
+                'clicks': 0,
+                'likes': 0,
+                'comments': 0,
+                'shares': 0,
+                'share_mentions': 0,
+                'comment_mentions': 0,
+                'total_interactions': 0,
+                'click_through_rate': 0,
+                'interaction_rate': 0
+            }
         else:
-            stats['engagement']['click_through_rate'] = 0
+            # Obtenir le premier élément (qui contient les stats d'organisation)
+            element = share_data['elements'][0]
             
-        # Calculer le nombre total d'interactions
-        total_interactions = (
-            stats['engagement']['clicks'] +
-            stats['engagement']['likes'] +
-            stats['engagement']['comments'] +
-            stats['engagement']['shares']
-        )
+            if 'totalShareStatistics' not in element:
+                print("Aucune statistique de partage trouvée dans les données.")
+                # Initialiser avec des valeurs par défaut
+                stats['impressions'] = {'total': 0, 'unique': 0}
+                stats['engagement'] = {
+                    'rate': 0,
+                    'clicks': 0,
+                    'likes': 0,
+                    'comments': 0,
+                    'shares': 0,
+                    'share_mentions': 0,
+                    'comment_mentions': 0,
+                    'total_interactions': 0,
+                    'click_through_rate': 0,
+                    'interaction_rate': 0
+                }
+            else:
+                # Extraire les statistiques principales
+                share_stats = element['totalShareStatistics']
+                
+                stats['impressions'] = {
+                    'total': share_stats.get('impressionCount', 0),
+                    'unique': share_stats.get('uniqueImpressionsCount', 0)
+                }
+                
+                stats['engagement'] = {
+                    'rate': share_stats.get('engagement', 0) * 100,  # Convertir en pourcentage
+                    'clicks': share_stats.get('clickCount', 0),
+                    'likes': share_stats.get('likeCount', 0),
+                    'comments': share_stats.get('commentCount', 0),
+                    'shares': share_stats.get('shareCount', 0),
+                    'share_mentions': share_stats.get('shareMentionsCount', 0),
+                    'comment_mentions': share_stats.get('commentMentionsCount', 0)
+                }
+                
+                # Calcul de métriques dérivées
+                if stats['impressions']['total'] > 0:
+                    stats['engagement']['click_through_rate'] = (stats['engagement']['clicks'] / stats['impressions']['total']) * 100
+                else:
+                    stats['engagement']['click_through_rate'] = 0
+                    
+                # Calculer le nombre total d'interactions
+                total_interactions = (
+                    stats['engagement']['clicks'] +
+                    stats['engagement']['likes'] +
+                    stats['engagement']['comments'] +
+                    stats['engagement']['shares']
+                )
+                
+                stats['engagement']['total_interactions'] = total_interactions
+                
+                if stats['impressions']['total'] > 0:
+                    stats['engagement']['interaction_rate'] = (total_interactions / stats['impressions']['total']) * 100
+                else:
+                    stats['engagement']['interaction_rate'] = 0
         
-        stats['engagement']['total_interactions'] = total_interactions
+        # Ajout des statistiques lifetime de la page si disponibles
+        stats['page_lifetime'] = {}
         
-        if stats['impressions']['total'] > 0:
-            stats['engagement']['interaction_rate'] = (total_interactions / stats['impressions']['total']) * 100
-        else:
-            stats['engagement']['interaction_rate'] = 0
+        if page_data and 'elements' in page_data and len(page_data['elements']) > 0:
+            element = page_data['elements'][0]
+            
+            if 'totalPageStatistics' in element:
+                total_stats = element['totalPageStatistics']
+                
+                # Statistiques de vues
+                if 'views' in total_stats:
+                    views = total_stats['views']
+                    stats['page_lifetime']['views'] = {
+                        'all_page_views': views.get('allPageViews', {}).get('pageViews', 0),
+                        'desktop_page_views': views.get('allDesktopPageViews', {}).get('pageViews', 0),
+                        'mobile_page_views': views.get('allMobilePageViews', {}).get('pageViews', 0),
+                        
+                        # Vues par section
+                        'overview_page_views': views.get('overviewPageViews', {}).get('pageViews', 0),
+                        'about_page_views': views.get('aboutPageViews', {}).get('pageViews', 0) if 'aboutPageViews' in views else 0,
+                        'people_page_views': views.get('peoplePageViews', {}).get('pageViews', 0) if 'peoplePageViews' in views else 0,
+                        'jobs_page_views': views.get('jobsPageViews', {}).get('pageViews', 0) if 'jobsPageViews' in views else 0,
+                        'careers_page_views': views.get('careersPageViews', {}).get('pageViews', 0) if 'careersPageViews' in views else 0,
+                        'life_at_page_views': views.get('lifeAtPageViews', {}).get('pageViews', 0) if 'lifeAtPageViews' in views else 0,
+                        
+                        # Desktop par section
+                        'desktop_overview_views': views.get('desktopOverviewPageViews', {}).get('pageViews', 0) if 'desktopOverviewPageViews' in views else 0,
+                        'desktop_careers_views': views.get('desktopCareersPageViews', {}).get('pageViews', 0) if 'desktopCareersPageViews' in views else 0,
+                        'desktop_jobs_views': views.get('desktopJobsPageViews', {}).get('pageViews', 0) if 'desktopJobsPageViews' in views else 0,
+                        'desktop_life_at_views': views.get('desktopLifeAtPageViews', {}).get('pageViews', 0) if 'desktopLifeAtPageViews' in views else 0,
+                        
+                        # Mobile par section
+                        'mobile_overview_views': views.get('mobileOverviewPageViews', {}).get('pageViews', 0) if 'mobileOverviewPageViews' in views else 0,
+                        'mobile_careers_views': views.get('mobileCareersPageViews', {}).get('pageViews', 0) if 'mobileCareersPageViews' in views else 0,
+                        'mobile_jobs_views': views.get('mobileJobsPageViews', {}).get('pageViews', 0) if 'mobileJobsPageViews' in views else 0,
+                        'mobile_life_at_views': views.get('mobileLifeAtPageViews', {}).get('pageViews', 0) if 'mobileLifeAtPageViews' in views else 0
+                    }
+                
+                # Statistiques de clics sur boutons
+                if 'clicks' in total_stats:
+                    clicks = total_stats['clicks']
+                    
+                    # Extraire les clics sur les boutons personnalisés
+                    desktop_custom_button_clicks = clicks.get('desktopCustomButtonClickCounts', [])
+                    mobile_custom_button_clicks = clicks.get('mobileCustomButtonClickCounts', [])
+                    
+                    # Calculer le total des clics sur les boutons personnalisés
+                    desktop_button_clicks_total = sum([click.get('count', 0) for click in desktop_custom_button_clicks]) if desktop_custom_button_clicks else 0
+                    mobile_button_clicks_total = sum([click.get('count', 0) for click in mobile_custom_button_clicks]) if mobile_custom_button_clicks else 0
+                    
+                    stats['page_lifetime']['clicks'] = {
+                        'desktop_button_clicks': desktop_button_clicks_total,
+                        'mobile_button_clicks': mobile_button_clicks_total,
+                        'total_button_clicks': desktop_button_clicks_total + mobile_button_clicks_total
+                    }
         
         return stats
 
@@ -203,58 +325,112 @@ class GoogleSheetsExporter:
         except Exception as e:
             print(f"Erreur lors de la vérification des permissions: {e}")
     
-    def prepare_and_update_stats_sheet(self, stats):
-        """Prépare et met à jour la feuille principale des statistiques"""
+    def update_stats_sheet(self, stats):
+        """Met à jour la feuille des statistiques avec toutes les données dans un seul onglet"""
         try:
             # Utiliser la feuille Sheet1 existante ou en créer une nouvelle
             try:
                 sheet = self.spreadsheet.worksheet("Sheet1")
-                sheet.update_title("Statistiques de partage")
-                print("Feuille 'Sheet1' renommée en 'Statistiques de partage'")
+                sheet.update_title("Statistiques LinkedIn")
+                print("Feuille 'Sheet1' renommée en 'Statistiques LinkedIn'")
             except gspread.exceptions.WorksheetNotFound:
                 try:
-                    sheet = self.spreadsheet.worksheet("Statistiques de partage")
-                    print("Feuille 'Statistiques de partage' utilisée pour les statistiques")
+                    sheet = self.spreadsheet.worksheet("Statistiques LinkedIn")
+                    print("Feuille 'Statistiques LinkedIn' utilisée pour les statistiques")
                 except gspread.exceptions.WorksheetNotFound:
-                    sheet = self.spreadsheet.add_worksheet(title="Statistiques de partage", rows=1000, cols=15)
-                    print("Nouvelle feuille 'Statistiques de partage' créée pour les statistiques")
+                    sheet = self.spreadsheet.add_worksheet(title="Statistiques LinkedIn", rows=1000, cols=35)
+                    print("Nouvelle feuille 'Statistiques LinkedIn' créée pour les statistiques")
             
             # Vérifier si nous avons déjà des données dans la feuille
             existing_data = sheet.get_all_values()
             headers_exist = len(existing_data) > 0 and len(existing_data[0]) > 1  # Vérifier que la première ligne a du contenu
             
-            # Définir les en-têtes
+            # Définir les en-têtes (tous dans un seul onglet)
             headers = [
-                "Date", 
-                "Total Impressions", 
-                "Impressions Uniques", 
-                "Taux d'engagement (%)", 
-                "Clics", 
-                "Likes", 
-                "Commentaires", 
-                "Partages",
-                "Mentions dans partages",
-                "Mentions dans commentaires",
-                "Total interactions", 
-                "Taux de clic (%)", 
-                "Taux d'interaction (%)"
+                # Informations générales
+                "Date de mesure", 
+                
+                # Statistiques de partage
+                "Impressions totales (depuis création)", 
+                "Impressions uniques (depuis création)", 
+                "Taux d'engagement global (%)", 
+                "Nombre total de clics (depuis création)", 
+                "Nombre total de J'aime (depuis création)", 
+                "Nombre total de commentaires (depuis création)", 
+                "Nombre total de partages (depuis création)",
+                "Nombre total de mentions dans partages (depuis création)",
+                "Nombre total de mentions dans commentaires (depuis création)",
+                "Nombre total d'interactions (depuis création)", 
+                "Taux de clic global (%)", 
+                "Taux d'interaction global (%)",
+                
+                # Statistiques lifetime générales
+                "Vues totales (lifetime)",
+                "Vues desktop (lifetime)",
+                "Vues mobile (lifetime)",
+                "Clics boutons desktop (lifetime)",
+                "Clics boutons mobile (lifetime)",
+                "Total clics boutons (lifetime)",
+                
+                # Vues par section
+                "Vues page d'accueil (lifetime)",
+                "Vues page À propos (lifetime)",
+                "Vues page Personnes (lifetime)",
+                "Vues page Emplois (lifetime)",
+                "Vues page Carrières (lifetime)",
+                "Vues page Vie en entreprise (lifetime)",
+                
+                # Vues desktop par section
+                "Vues desktop accueil (lifetime)",
+                "Vues desktop carrières (lifetime)",
+                "Vues desktop emplois (lifetime)",
+                "Vues desktop vie entreprise (lifetime)",
+                
+                # Vues mobile par section
+                "Vues mobile accueil (lifetime)",
+                "Vues mobile carrières (lifetime)",
+                "Vues mobile emplois (lifetime)",
+                "Vues mobile vie entreprise (lifetime)"
             ]
             
-            # Si nous n'avons pas d'en-têtes existantes, les ajouter
-            if not headers_exist:
+            # Vérifier si les en-têtes doivent être mis à jour
+            headers_need_update = True
+            
+            if headers_exist:
+                # Comparer les en-têtes existants avec ceux définis
+                existing_headers = existing_data[0]
+                
+                # Vérifier si le nombre d'en-têtes correspond
+                if len(existing_headers) == len(headers):
+                    # Vérifier si tous les en-têtes correspondent
+                    headers_match = all(eh.strip() == h.strip() for eh, h in zip(existing_headers, headers))
+                    if headers_match:
+                        headers_need_update = False
+            
+            # Si les en-têtes ont besoin d'être mis à jour ou n'existent pas
+            if headers_need_update:
                 sheet.update([headers], "A1")
                 
                 # Formater les en-têtes
-                sheet.format('A1:M1', {
+                last_col = chr(ord('A') + len(headers) - 1)  # Convertir le nombre de colonnes en lettre
+                sheet.format(f'A1:{last_col}1', {
                     "textFormat": {"bold": True},
                     "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
                 })
                 
-                print("En-têtes ajoutés à la feuille")
+                print("En-têtes ajoutés ou mis à jour dans la feuille")
+                
+                # Recharger les données après la mise à jour des en-têtes
+                if headers_exist:
+                    existing_data = sheet.get_all_values()
             
             # Préparer les nouvelles données
+            views = stats['page_lifetime'].get('views', {})
             new_row = [
+                # Informations générales
                 stats['date'],
+                
+                # Statistiques de partage
                 stats['impressions']['total'],
                 stats['impressions']['unique'],
                 f"{stats['engagement']['rate']:.2f}",
@@ -266,7 +442,35 @@ class GoogleSheetsExporter:
                 stats['engagement']['comment_mentions'],
                 stats['engagement']['total_interactions'],
                 f"{stats['engagement']['click_through_rate']:.2f}",
-                f"{stats['engagement']['interaction_rate']:.2f}"
+                f"{stats['engagement']['interaction_rate']:.2f}",
+                
+                # Statistiques lifetime générales
+                views.get('all_page_views', 0),
+                views.get('desktop_page_views', 0),
+                views.get('mobile_page_views', 0),
+                stats['page_lifetime'].get('clicks', {}).get('desktop_button_clicks', 0),
+                stats['page_lifetime'].get('clicks', {}).get('mobile_button_clicks', 0),
+                stats['page_lifetime'].get('clicks', {}).get('total_button_clicks', 0),
+                
+                # Vues par section
+                views.get('overview_page_views', 0),
+                views.get('about_page_views', 0),
+                views.get('people_page_views', 0),
+                views.get('jobs_page_views', 0),
+                views.get('careers_page_views', 0),
+                views.get('life_at_page_views', 0),
+                
+                # Vues desktop par section
+                views.get('desktop_overview_views', 0),
+                views.get('desktop_careers_views', 0),
+                views.get('desktop_jobs_views', 0),
+                views.get('desktop_life_at_views', 0),
+                
+                # Vues mobile par section
+                views.get('mobile_overview_views', 0),
+                views.get('mobile_careers_views', 0),
+                views.get('mobile_jobs_views', 0),
+                views.get('mobile_life_at_views', 0)
             ]
             
             # Vérifier si la date existe déjà
@@ -289,10 +493,28 @@ class GoogleSheetsExporter:
                 next_row = len(existing_data) + 1 if headers_exist else 2
                 sheet.update([new_row], f"A{next_row}")
                 print(f"Nouvelle entrée ajoutée pour la date {current_date} à la ligne {next_row}")
+                
+            # Ajouter une note explicative sous le tableau
+            note_row = len(existing_data) + 2
+            note = ["Note: Ces statistiques représentent les données cumulatives depuis la création de la page LinkedIn."]
+            try:
+                # Vérifier si la note existe déjà
+                if note_row <= sheet.row_count and sheet.cell(note_row, 1).value == "":
+                    sheet.update([note], f"A{note_row}")
+                    sheet.format(f"A{note_row}", {
+                        "textFormat": {"italic": True},
+                        "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95}
+                    })
+                    # Fusionner les cellules pour la note
+                    last_col = chr(ord('A') + len(headers) - 1)
+                    sheet.merge_cells(f"A{note_row}:{last_col}{note_row}")
+            except:
+                # Si une erreur survient lors de la tentative d'ajout de la note, l'ignorer
+                pass
             
             return sheet
         except Exception as e:
-            print(f"Erreur lors de la préparation de la feuille de statistiques: {e}")
+            print(f"Erreur lors de la mise à jour de la feuille de statistiques: {e}")
             return None
     
     def add_share_statistics(self, stats):
@@ -304,8 +526,8 @@ class GoogleSheetsExporter:
         # Vérifier les permissions de partage pour s'assurer que l'admin a toujours accès
         self.ensure_admin_access()
         
-        # Mettre à jour la feuille principale
-        self.prepare_and_update_stats_sheet(stats)
+        # Mettre à jour la feuille avec toutes les données
+        self.update_stats_sheet(stats)
         
         # URL du spreadsheet
         sheet_url = f"https://docs.google.com/spreadsheets/d/{self.spreadsheet.id}"
@@ -333,9 +555,6 @@ def verify_token(access_token):
     except Exception as e:
         return False, str(e)
 
-
-# Remarque: Cette fonction a été ajustée pour mettre en évidence les noms de colonnes
-# et ne pas utiliser d'onglet Résumé, mais plutôt une seule feuille avec un historique chronologique
 
 if __name__ == "__main__":
     # Récupération des variables d'environnement
@@ -365,27 +584,46 @@ if __name__ == "__main__":
     tracker = LinkedInShareStatisticsTracker(access_token, organization_id, sheet_name)
     
     # Obtention des statistiques de partage
-    print("\n--- Récupération des statistiques de partage ---")
-    raw_stats = tracker.get_share_statistics()
+    print("\n--- Récupération des statistiques cumulatives de partage ---")
+    raw_share_stats = tracker.get_share_statistics()
     
-    if raw_stats:
+    # Obtention des statistiques lifetime de la page
+    print("\n--- Récupération des statistiques lifetime de la page ---")
+    raw_page_stats = tracker.get_page_statistics()
+    
+    if raw_share_stats or raw_page_stats:
         # Traitement des données
         print("Analyse des données statistiques...")
-        stats = tracker.parse_share_statistics(raw_stats)
+        stats = tracker.parse_share_statistics(raw_share_stats, raw_page_stats)
         
         # Afficher un aperçu des données
-        print("\n--- Aperçu des statistiques ---")
-        print(f"Date: {stats['date']}")
-        print(f"Impressions totales: {stats['impressions']['total']}")
-        print(f"Impressions uniques: {stats['impressions']['unique']}")
-        print(f"Taux d'engagement: {stats['engagement']['rate']:.2f}%")
-        print(f"Clics: {stats['engagement']['clicks']}")
-        print(f"Likes: {stats['engagement']['likes']}")
-        print(f"Commentaires: {stats['engagement']['comments']}")
-        print(f"Partages: {stats['engagement']['shares']}")
-        print(f"Total interactions: {stats['engagement']['total_interactions']}")
-        print(f"Taux de clic: {stats['engagement']['click_through_rate']:.2f}%")
-        print(f"Taux d'interaction: {stats['engagement']['interaction_rate']:.2f}%")
+        print("\n--- Aperçu des statistiques cumulatives (depuis la création de la page) ---")
+        print(f"Date de mesure: {stats['date']}")
+        print(f"Impressions totales (depuis création): {stats['impressions']['total']}")
+        print(f"Impressions uniques (depuis création): {stats['impressions']['unique']}")
+        print(f"Taux d'engagement global: {stats['engagement']['rate']:.2f}%")
+        print(f"Nombre total de clics (depuis création): {stats['engagement']['clicks']}")
+        print(f"Nombre total de J'aime (depuis création): {stats['engagement']['likes']}")
+        print(f"Nombre total de commentaires (depuis création): {stats['engagement']['comments']}")
+        print(f"Nombre total de partages (depuis création): {stats['engagement']['shares']}")
+        print(f"Nombre total d'interactions (depuis création): {stats['engagement']['total_interactions']}")
+        print(f"Taux de clic global: {stats['engagement']['click_through_rate']:.2f}%")
+        print(f"Taux d'interaction global: {stats['engagement']['interaction_rate']:.2f}%")
+        
+        # Afficher les métriques lifetime
+        if 'page_lifetime' in stats and stats['page_lifetime']:
+            print("\n--- Aperçu des statistiques lifetime de la page ---")
+            if 'views' in stats['page_lifetime']:
+                views = stats['page_lifetime']['views']
+                print(f"Vues totales (lifetime): {views.get('all_page_views', 0)}")
+                print(f"Vues desktop (lifetime): {views.get('desktop_page_views', 0)}")
+                print(f"Vues mobile (lifetime): {views.get('mobile_page_views', 0)}")
+            
+            if 'clicks' in stats['page_lifetime']:
+                clicks = stats['page_lifetime']['clicks']
+                print(f"Clics boutons desktop (lifetime): {clicks.get('desktop_button_clicks', 0)}")
+                print(f"Clics boutons mobile (lifetime): {clicks.get('mobile_button_clicks', 0)}")
+                print(f"Total clics boutons (lifetime): {clicks.get('total_button_clicks', 0)}")
         
         # Chemin vers les credentials
         # Remonter aux répertoires parents pour trouver le dossier credentials
@@ -407,4 +645,4 @@ if __name__ == "__main__":
         else:
             print("❌ Échec de l'export")
     else:
-        print("❌ Impossible de récupérer les statistiques de partage")
+        print("❌ Impossible de récupérer les statistiques")

@@ -366,6 +366,49 @@ class LinkedInPostMetricsTracker:
         print(f"Échec après plusieurs tentatives pour obtenir les statistiques du post {ugcpost_urn}")
         return {}
     
+    def get_post_reactions(self, post_urn):
+        """Obtient les réactions détaillées pour un post"""
+        encoded_urn = urllib.parse.quote(post_urn)
+        url = f"{self.base_url_rest}/socialMetadata/{encoded_urn}"
+        
+        max_retries = 3
+        retry_delay = 2
+        
+        print(f"Récupération des réactions détaillées pour le post: {post_urn}")
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, headers=self.get_headers(is_rest_api=True))
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"Réactions détaillées récupérées avec succès pour {post_urn}")
+                    return data.get('reactionSummaries', {})
+                    
+                elif response.status_code == 429:
+                    print(f"Rate limit atteint, attente de {retry_delay} secondes...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                elif response.status_code == 404:
+                    print(f"Post non trouvé ou pas de réactions: {post_urn}")
+                    return {}
+                elif response.status_code == 403:
+                    print(f"Non autorisé à accéder aux réactions pour le post: {post_urn}")
+                    return {}
+                else:
+                    print(f"Erreur API socialMetadata: {response.status_code} - {response.text}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    
+            except Exception as e:
+                print(f"Exception lors de la requête socialMetadata: {e}")
+                traceback.print_exc()
+                time.sleep(retry_delay)
+                retry_delay *= 2
+        
+        print(f"Échec après plusieurs tentatives pour obtenir les réactions du post {post_urn}")
+        return {}
+    
     def get_all_post_metrics(self):
         """Récupère toutes les métriques pour tous les posts de l'organisation"""
         # Récupérer tous les posts
@@ -455,12 +498,33 @@ class LinkedInPostMetricsTracker:
             except Exception as e:
                 print(f"Erreur lors de la récupération des statistiques pour {post_urn}: {e}")
             
+            # Récupérer les réactions détaillées pour le post
+            reactions = {}
+            try:
+                reactions = self.get_post_reactions(post_urn)
+                if not reactions:
+                    print(f"⚠️ Impossible d'obtenir les réactions détaillées pour {post_urn}, utilisation de valeurs par défaut")
+            except Exception as e:
+                print(f"Erreur lors de la récupération des réactions pour {post_urn}: {e}")
+            
             # Pause pour respecter les limites de l'API avant de continuer
             time.sleep(3)
             
             # Extraire les métriques de commentaires et likes
             likes_summary = social_actions.get('likesSummary', {})
             comments_summary = social_actions.get('commentsSummary', {})
+            
+            # Extraire les compteurs pour chaque type de réaction
+            like_count = reactions.get('LIKE', {}).get('count', 0)
+            praise_count = reactions.get('PRAISE', {}).get('count', 0)
+            empathy_count = reactions.get('EMPATHY', {}).get('count', 0)
+            interest_count = reactions.get('INTEREST', {}).get('count', 0)
+            appreciation_count = reactions.get('APPRECIATION', {}).get('count', 0)
+            entertainment_count = reactions.get('ENTERTAINMENT', {}).get('count', 0)
+            
+            # Calculer le total des réactions (somme de tous les types)
+            total_reactions = (like_count + praise_count + empathy_count + 
+                              interest_count + appreciation_count + entertainment_count)
             
             # Agrégation des métriques dans un dictionnaire
             post_metric = {
@@ -471,13 +535,21 @@ class LinkedInPostMetricsTracker:
                 'media_type': content['media_type'],
                 'media_url': content['media_url'],
                 'author': content['author'],
+                # Métriques d'engagement générales
                 'total_comments': comments_summary.get('aggregatedTotalComments', 0),
-                'total_likes': likes_summary.get('aggregatedTotalLikes', 0),
                 'impressions': share_stats.get('impressionCount', 0),
                 'unique_impressions': share_stats.get('uniqueImpressionsCount', 0),
                 'clicks': share_stats.get('clickCount', 0),
                 'shares': share_stats.get('shareCount', 0),
-                'engagement_rate': share_stats.get('engagement', 0)
+                'engagement_rate': share_stats.get('engagement', 0),
+                # Réactions détaillées
+                'total_reactions': total_reactions,
+                'like_count': like_count,
+                'praise_count': praise_count,  # Celebrate
+                'empathy_count': empathy_count,  # Love
+                'interest_count': interest_count,  # Insightful
+                'appreciation_count': appreciation_count,  # Support
+                'entertainment_count': entertainment_count   # Funny
             }
             
             # Ajouter les métriques à notre liste
@@ -568,11 +640,12 @@ class GoogleSheetsExporter:
                 worksheet = self.spreadsheet.worksheet(worksheet_name)
                 print(f"Feuille '{worksheet_name}' trouvée")
             except gspread.exceptions.WorksheetNotFound:
-                worksheet = self.spreadsheet.add_worksheet(title=worksheet_name, rows=1000, cols=20)
+                worksheet = self.spreadsheet.add_worksheet(title=worksheet_name, rows=1000, cols=31)  # Augmenté à 31 colonnes
                 print(f"Nouvelle feuille '{worksheet_name}' créée")
             
-            # Définir les en-têtes
+            # Définir les en-têtes de manière logique
             headers = [
+                # Informations sur le post
                 "Post ID",
                 "Type de post",
                 "Date de création",
@@ -580,13 +653,32 @@ class GoogleSheetsExporter:
                 "Type de média",
                 "URL du média",
                 "Auteur",
-                "Nombre de commentaires",
-                "Nombre de likes",
+                
+                # Métriques d'impressions et d'interactions
                 "Impressions",
                 "Impressions uniques",
                 "Clics",
                 "Partages",
-                "Taux d'engagement (%)"
+                "Taux d'engagement (%)",
+                "Nombre de commentaires",
+                
+                # Métriques de réactions
+                "Total des réactions",  # Somme de toutes les réactions
+                "J'aime (Like)",        # Réactions détaillées
+                "Célébration (Praise)",
+                "J'adore (Empathy)",
+                "Intéressant (Interest)",
+                "Soutien (Appreciation)", 
+                "Amusant (Entertainment)",
+                "% J'aime",             # Pourcentage de chaque type de réaction
+                "% Célébration",
+                "% J'adore",
+                "% Intéressant", 
+                "% Soutien",
+                "% Amusant",
+                
+                # Nouvelle colonne pour les engagements totaux
+                "Engagements totaux"
             ]
             
             # CORRECTION: Ordre des arguments pour worksheet.update
@@ -610,21 +702,55 @@ class GoogleSheetsExporter:
                 # Calculer le taux d'engagement en pourcentage
                 engagement_rate = post['engagement_rate'] * 100 if isinstance(post['engagement_rate'], (int, float)) else 0
                 
+                # Calculer les pourcentages de chaque type de réaction
+                total_reactions = post['total_reactions']
+                pct_like = (post['like_count'] / total_reactions * 100) if total_reactions > 0 else 0
+                pct_praise = (post['praise_count'] / total_reactions * 100) if total_reactions > 0 else 0
+                pct_empathy = (post['empathy_count'] / total_reactions * 100) if total_reactions > 0 else 0
+                pct_interest = (post['interest_count'] / total_reactions * 100) if total_reactions > 0 else 0
+                pct_appreciation = (post['appreciation_count'] / total_reactions * 100) if total_reactions > 0 else 0
+                pct_entertainment = (post['entertainment_count'] / total_reactions * 100) if total_reactions > 0 else 0
+                
+                # Calculer les engagements totaux (somme des clics, partages, commentaires et total des réactions)
+                total_engagements = post['clicks'] + post['shares'] + post['total_comments'] + post['total_reactions']
+                
                 row = [
+                    # Informations sur le post
                     post['post_id'],
-                    post['post_type'],  # Type de post
+                    post['post_type'],
                     post['creation_date'],
                     text,
                     post['media_type'],
                     post['media_url'],
                     post['author'],
-                    post['total_comments'],
-                    post['total_likes'],
+                    
+                    # Métriques d'impressions et d'interactions
                     post['impressions'],
                     post['unique_impressions'],
                     post['clicks'],
                     post['shares'],
-                    engagement_rate
+                    engagement_rate,
+                    post['total_comments'],
+                    
+                    # Métriques de réactions
+                    post['total_reactions'],
+                    post['like_count'],
+                    post['praise_count'],
+                    post['empathy_count'],
+                    post['interest_count'],
+                    post['appreciation_count'],
+                    post['entertainment_count'],
+                    
+                    # Pourcentages de réactions
+                    round(pct_like, 2),
+                    round(pct_praise, 2),
+                    round(pct_empathy, 2),
+                    round(pct_interest, 2),
+                    round(pct_appreciation, 2),
+                    round(pct_entertainment, 2),
+                    
+                    # Engagements totaux
+                    total_engagements
                 ]
                 rows.append(row)
             
