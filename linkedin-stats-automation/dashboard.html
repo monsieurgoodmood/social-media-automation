@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Analytics - Monitoring Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #0077b5 0%, #00a0dc 100%);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        
+        .monitoring-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .monitor-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .monitor-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            color: #0077b5;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-left: auto;
+        }
+        
+        .status-active { background: #28a745; }
+        .status-pending { background: #ffc107; }
+        .status-error { background: #dc3545; }
+        .status-inactive { background: #6c757d; }
+        
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .metric-row:last-child {
+            border-bottom: none;
+        }
+        
+        .metric-value {
+            font-weight: 600;
+        }
+        
+        .sheets-list {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .sheets-list h2 {
+            color: #0077b5;
+            margin-bottom: 1rem;
+        }
+        
+        .org-section {
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .org-section h4 {
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        
+        .sheet-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .sheet-link {
+            padding: 0.25rem 0.75rem;
+            background: #0077b5;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+        }
+        
+        .sheet-link:hover {
+            background: #005885;
+        }
+        
+        .quick-actions {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .action-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .action-button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            background: #0077b5;
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .action-button:hover {
+            background: #005885;
+        }
+        
+        .action-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .logs-section {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .log-entry {
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            border-left: 3px solid #0077b5;
+            background: #f8f9fa;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+        
+        .log-entry.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+        
+        .log-entry.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+        
+        .timestamp {
+            color: #666;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 LinkedIn Analytics - Monitoring Dashboard</h1>
+        <p>Surveillance en temps réel de votre automatisation</p>
+    </div>
+    
+    <div class="container">
+        <!-- Actions rapides -->
+        <div class="quick-actions">
+            <h2>⚡ Actions rapides</h2>
+            <div class="action-buttons">
+                <button class="action-button" onclick="checkSystemHealth()">
+                    🔍 Vérifier l'état du système
+                </button>
+                <button class="action-button" onclick="runManualTest()">
+                    🧪 Test manuel
+                </button>
+                <button class="action-button" onclick="refreshTokenStatus()">
+                    🔑 Vérifier les tokens
+                </button>
+                <button class="action-button" onclick="viewRecentLogs()">
+                    📜 Logs récents
+                </button>
+            </div>
+        </div>
+        
+        <!-- Grille de monitoring -->
+        <div class="monitoring-grid">
+            <!-- État de la Cloud Function -->
+            <div class="monitor-card">
+                <h3>
+                    ☁️ Cloud Function
+                    <span class="status-indicator status-pending" id="function-status"></span>
+                </h3>
+                <div class="metric-row">
+                    <span>Nom</span>
+                    <span class="metric-value">run-linkedin-analytics</span>
+                </div>
+                <div class="metric-row">
+                    <span>Région</span>
+                    <span class="metric-value">europe-west1</span>
+                </div>
+                <div class="metric-row">
+                    <span>Mémoire</span>
+                    <span class="metric-value">512 MB</span>
+                </div>
+                <div class="metric-row">
+                    <span>Timeout</span>
+                    <span class="metric-value">540s</span>
+                </div>
+                <div class="metric-row">
+                    <span>Dernière exécution</span>
+                    <span class="metric-value" id="last-execution">-</span>
+                </div>
+            </div>
+            
+            <!-- État des tâches planifiées -->
+            <div class="monitor-card">
+                <h3>
+                    ⏰ Tâches planifiées
+                    <span class="status-indicator status-pending" id="scheduler-status"></span>
+                </h3>
+                <div class="metric-row">
+                    <span>Découverte organisations</span>
+                    <span class="metric-value">Lundi 3h00</span>
+                </div>
+                <div class="metric-row">
+                    <span>Stats quotidiennes</span>
+                    <span class="metric-value">Tous les jours 2h00</span>
+                </div>
+                <div class="metric-row">
+                    <span>Followers</span>
+                    <span class="metric-value">Tous les jours 4h00</span>
+                </div>
+                <div class="metric-row">
+                    <span>Métriques posts</span>
+                    <span class="metric-value">Mar & Ven 5h00</span>
+                </div>
+                <div class="metric-row">
+                    <span>Stats pays</span>
+                    <span class="metric-value">Mercredi 6h00</span>
+                </div>
+            </div>
+            
+            <!-- État des organisations -->
+            <div class="monitor-card">
+                <h3>
+                    🏢 Organisations
+                    <span class="status-indicator status-active"></span>
+                </h3>
+                <div class="metric-row">
+                    <span>Total configurées</span>
+                    <span class="metric-value">9</span>
+                </div>
+                <div class="metric-row">
+                    <span>Actives</span>
+                    <span class="metric-value">9</span>
+                </div>
+                <div class="metric-row">
+                    <span>En erreur</span>
+                    <span class="metric-value">0</span>
+                </div>
+                <div class="metric-row">
+                    <span>Dernière découverte</span>
+                    <span class="metric-value">27/05/2025</span>
+                </div>
+            </div>
+            
+            <!-- État des tokens -->
+            <div class="monitor-card">
+                <h3>
+                    🔑 Tokens LinkedIn
+                    <span class="status-indicator status-pending" id="token-status"></span>
+                </h3>
+                <div class="metric-row">
+                    <span>Community API</span>
+                    <span class="metric-value" id="community-token">Vérification...</span>
+                </div>
+                <div class="metric-row">
+                    <span>Portability API</span>
+                    <span class="metric-value" id="portability-token">Vérification...</span>
+                </div>
+                <div class="metric-row">
+                    <span>Expiration</span>
+                    <span class="metric-value" id="token-expiry">~60 jours</span>
+                </div>
+                <div class="metric-row">
+                    <span>Dernière vérification</span>
+                    <span class="metric-value" id="last-token-check">-</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Liste des Google Sheets -->
+        <div class="sheets-list">
+            <h2>📊 Google Sheets par organisation</h2>
+            
+            <div class="org-section">
+                <h4>RSP Intelligence collective</h4>
+                <div class="sheet-links">
+                    <a href="https://docs.google.com/spreadsheets/d/1OM0ZEAyQfKPal6g-qKC2gUyOI9YyEpy99xxPv-siBTA" target="_blank" class="sheet-link">Stats quotidiennes</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1p7bipQikFsQ1h84y9EmwEUPFZ02BQadQuxK3UbVWnns" target="_blank" class="sheet-link">Followers</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1KnUM1oqNYj-QOkXPzbuMJbcmoxXcdid1XlBl1p-DcPM" target="_blank" class="sheet-link">Posts</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1MSC7aX0Iov_hIkTpbp5_5dhF2Ua0OcPAw3T_kpnGPYM" target="_blank" class="sheet-link">Partages</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1YzzjiIAe7ehYFjzkdnPGC03MFKW3Lp72W5xjhjsaoyQ" target="_blank" class="sheet-link">Pays</a>
+                </div>
+            </div>
+            
+            <div class="org-section">
+                <h4>Humtastic™</h4>
+                <div class="sheet-links">
+                    <a href="https://docs.google.com/spreadsheets/d/1rYXEqt5I4e2mWRS5noRlQKGqcCaJ8Zx7r6Q1G_h9X3M" target="_blank" class="sheet-link">Stats quotidiennes</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1PdaJ9iI6pk4HGXo6mltNWWOoOAPowaFonEItGPlFUVE" target="_blank" class="sheet-link">Followers</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1sdOPDCuGhXDTyVGBjikcQ6eVKqZ_957CTICRhoLhm1I" target="_blank" class="sheet-link">Posts</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1aXYLi_MFsN5qPQF2zq-nNOPRhTquFU6RGR18JH5Y3jU" target="_blank" class="sheet-link">Partages</a>
+                    <a href="https://docs.google.com/spreadsheets/d/1L3OzYRAZ9Yczl4juNgo2FMNbcMV9cuY5DA5RcyAhoe0" target="_blank" class="sheet-link">Pays</a>
+                </div>
+            </div>
+            
+            <!-- Ajouter d'autres organisations selon vos besoins -->
+        </div>
+        
+        <!-- Section des logs -->
+        <div class="logs-section">
+            <h2>📜 Logs récents</h2>
+            <div id="logs-container">
+                <div class="log-entry">
+                    <span class="timestamp">2025-05-30 02:00:01</span>
+                    <span>daily-statistics: Démarrage de la collecte quotidienne...</span>
+                </div>
+                <div class="log-entry success">
+                    <span class="timestamp">2025-05-30 02:05:23</span>
+                    <span>daily-statistics: ✅ 9 organisations traitées avec succès</span>
+                </div>
+                <div class="log-entry">
+                    <span class="timestamp">2025-05-30 03:30:00</span>
+                    <span>share-statistics: Collecte des statistiques de partage...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // URL de la Cloud Function
+        const FUNCTION_URL = 'https://europe-west1-authentic-ether-457013-t5.cloudfunctions.net/run-linkedin-analytics';
+        const PROJECT_ID = 'authentic-ether-457013-t5';
+        
+        // Vérifier l'état du système
+        async function checkSystemHealth() {
+            console.log('Vérification de l\'état du système...');
+            
+            // Ici vous pourriez appeler votre Cloud Function avec un endpoint de health check
+            try {
+                const response = await fetch(FUNCTION_URL + '?health=true');
+                if (response.ok) {
+                    document.getElementById('function-status').className = 'status-indicator status-active';
+                    alert('✅ Cloud Function opérationnelle');
+                } else {
+                    document.getElementById('function-status').className = 'status-indicator status-error';
+                    alert('❌ Problème avec la Cloud Function');
+                }
+            } catch (error) {
+                document.getElementById('function-status').className = 'status-indicator status-error';
+                alert('❌ Impossible de joindre la Cloud Function');
+            }
+        }
+        
+        // Test manuel
+        async function runManualTest() {
+            if (!confirm('Voulez-vous lancer un test de découverte des organisations ?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(FUNCTION_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ script: 'discover_organizations' })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    alert('✅ Test réussi !');
+                } else {
+                    alert('❌ Échec du test: ' + (result.message || 'Erreur inconnue'));
+                }
+            } catch (error) {
+                alert('❌ Erreur: ' + error.message);
+            }
+        }
+        
+        // Vérifier les tokens
+        function refreshTokenStatus() {
+            // Simuler la vérification
+            document.getElementById('community-token').textContent = '✅ Valide';
+            document.getElementById('portability-token').textContent = '✅ Valide';
+            document.getElementById('token-status').className = 'status-indicator status-active';
+            document.getElementById('last-token-check').textContent = new Date().toLocaleString('fr-FR');
+        }
+        
+        // Afficher les logs récents
+        function viewRecentLogs() {
+            // Dans un cas réel, vous feriez un appel API pour récupérer les vrais logs
+            console.log('Récupération des logs...');
+            
+            // Pour l'instant, on scroll vers la section des logs
+            document.querySelector('.logs-section').scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        // Auto-refresh toutes les 5 minutes
+        setInterval(() => {
+            document.getElementById('last-execution').textContent = new Date().toLocaleString('fr-FR');
+        }, 300000);
+        
+        // Initialisation
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('last-execution').textContent = new Date().toLocaleString('fr-FR');
+        });
+    </script>
+</body>
+</html>

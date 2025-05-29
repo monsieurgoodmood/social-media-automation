@@ -1,0 +1,51 @@
+# Variables d'environnement
+.env
+.env.local
+.env.*.local
+
+# Credentials Google
+credentials/
+*.json
+service_account_credentials.json
+
+# Fichiers de configuration générés
+organizations_config.json
+organizations_report.json
+sheet_mapping.json
+
+# Fichiers de progression
+linkedin_stats_progress.json
+processing_results_*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Fichiers temporaires
+*.tmp
+*.bak
+~*
+
+# Résultats de tests
+test_results/
+*.test.json

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+__pycache__/
+*.pyc
+credentials/
+*.json
+!requirements.txt
+!package.json
+node_modules/
+test/
+tests/
+.pytest_cache/
+*.md
+!README.md
