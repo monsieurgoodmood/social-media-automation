@@ -941,7 +941,7 @@ class GoogleSheetsExporter:
             if not has_headers or len(existing_data) == 0 or len(existing_data[0]) == 0 or existing_data[0][0] == '':
                 print("   📝 Ajout des en-têtes en première ligne")
                 # Ajouter les en-têtes en une seule opération avec retry
-                self.api_request_with_retry(sheet.update, 'A1', [headers])
+                self.api_request_with_retry(sheet.update, values=[headers], range_name='A1')
                 
                 # Appliquer le formatage des en-têtes
                 self.format_columns_optimized(sheet, headers)
@@ -1124,7 +1124,7 @@ class GoogleSheetsExporter:
                         # Calculer le range pour l'ajout
                         last_col = get_column_letter(len(headers) - 1)
                         range_name = f'A{first_empty_row}:{last_col}{first_empty_row + len(batch) - 1}'
-                        self.api_request_with_retry(sheet.update, range_name, batch)
+                        self.api_request_with_retry(sheet.update, values=batch, range_name=range_name)
                         
                         # Mettre à jour les variables pour la prochaine itération
                         existing_data.extend(batch)
@@ -1156,7 +1156,7 @@ class GoogleSheetsExporter:
                     try:
                         last_col = get_column_letter(len(headers) - 1)
                         range_name = f'A{row_idx}:{last_col}{row_idx}'
-                        self.api_request_with_retry(sheet.update, range_name, [row_data])
+                        self.api_request_with_retry(sheet.update, values=[row_data], range_name=range_name)
                         processed_dates.add(row_data[0])  # Ajouter la date
                         print(f"   ✅ Mise à jour effectuée pour {row_data[0]} (ligne {row_idx})")
                         time.sleep(3)  # Pause plus longue entre chaque mise à jour

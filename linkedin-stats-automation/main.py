@@ -120,9 +120,74 @@ def upload_mapping_files():
             except Exception as e:
                 print(f"⚠ Erreur upload {filename}: {e}")
 
+import subprocess
+
+def execute_linkedin_script(script_name):
+    """Exécute directement le script LinkedIn"""
+    
+    script_files = {
+        'discover_organizations': 'discover_organizations.py',
+        'follower_statistics': 'linkedin_multi_follower_stats.py',
+        'share_statistics': 'linkedin_multi_org_share_tracker.py',
+        'page_statistics': 'linkedin_multi_page_stats.py',
+        'post_metrics': 'linkedin_multi_post_metrics.py',
+        'daily_statistics': 'linkedin_multi_org_tracker.py'
+    }
+    
+    if script_name not in script_files:
+        raise ValueError(f"Script inconnu: {script_name}")
+    
+    script_file = script_files[script_name]
+    script_path = f'/workspace/{script_file}'
+    
+    print(f"Exécution de {script_file}...")
+    print(f"Vérification: Le fichier {script_path} existe = {os.path.exists(script_path)}")
+    
+    # Préparer l'environnement
+    env = os.environ.copy()
+    env['AUTOMATED_MODE'] = 'true'
+    
+    # Exécuter avec subprocess
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd='/workspace',
+            timeout=500  # 8 minutes max
+        )
+        
+        # Afficher les résultats
+        if result.stdout:
+            print("=== SORTIE STANDARD ===")
+            # Limiter à 10000 caractères pour éviter les logs trop longs
+            print(result.stdout[:10000])
+            if len(result.stdout) > 10000:
+                print("... (sortie tronquée)")
+        
+        if result.stderr:
+            print("=== ERREURS ===")
+            print(result.stderr[:5000])
+        
+        print(f"=== Code de retour: {result.returncode} ===")
+        
+        return result.returncode == 0
+        
+    except subprocess.TimeoutExpired:
+        print("ERREUR: Timeout dépassé (500 secondes)")
+        return False
+    except Exception as e:
+        print(f"ERREUR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 @functions_framework.http
 def run_linkedin_analytics(request):
     """Point d'entrée principal pour Cloud Functions"""
+    
+    print("=== DÉBUT DE L'EXÉCUTION ===")
     
     # Récupérer le script à exécuter
     request_json = request.get_json(silent=True)
@@ -141,9 +206,22 @@ def run_linkedin_analytics(request):
     
     # Définir le mode automatique
     os.environ['AUTOMATED_MODE'] = 'true'
+    print(f"AUTOMATED_MODE défini: {os.environ.get('AUTOMATED_MODE')}")
     
     # Changer le répertoire de travail vers workspace
     os.chdir('/workspace')
+    print(f"Répertoire de travail: {os.getcwd()}")
+    
+    # Debug temporaire
+    print("=== DEBUG INFO ===")
+    print(f"PWD: {os.getcwd()}")
+    print(f"AUTOMATED_MODE: {os.environ.get('AUTOMATED_MODE')}")
+    print("Fichiers dans /workspace:")
+    workspace_files = os.listdir('/workspace')
+    for f in workspace_files[:20]:  # Limiter à 20 fichiers
+        print(f"  - {f}")
+    if len(workspace_files) > 20:
+        print(f"  ... et {len(workspace_files) - 20} autres fichiers")
     
     # Scripts disponibles
     available_scripts = [
@@ -158,19 +236,28 @@ def run_linkedin_analytics(request):
     # Exécuter le script demandé
     if script_name in available_scripts:
         try:
-            success = execute_script(script_name)
+            print(f"Lancement de execute_linkedin_script pour: {script_name}")
+            success = execute_linkedin_script(script_name)  # Utiliser la nouvelle fonction
+            print(f"Résultat de l'exécution: {success}")
             
             # Uploader les fichiers de mapping mis à jour
             if success:
                 upload_mapping_files()
             
-            return {
+            response = {
                 'status': 'success' if success else 'error',
                 'script': script_name,
                 'timestamp': datetime.now().isoformat()
             }
+            
+            print(f"=== RÉPONSE: {json.dumps(response)} ===")
+            return response
+            
         except Exception as e:
-            print(f"Erreur lors de l'exécution: {str(e)}")
+            print(f"ERREUR lors de l'exécution: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
             return {
                 'status': 'error',
                 'script': script_name,
