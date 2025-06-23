@@ -1,13 +1,56 @@
 # Ignore le dossier credentials
 credentials/
-facebook/config.py
 data/
 access_token.txt
-facebook_api/multi_pages_metrics.py/fb_access_token.json
-facebook_api/multi_pages_metrics.py/list_pages.txt
-facebook_api/multi_pages_metrics.py/.env
-facebook_api/daily_page_metrics_1.py
-facebook_api/daily_page_metrics.py
-facebook/
-facebook_api/
-facebook_saas/
+
+# Variables d'environnement
+.env
+.env.local
+.env.*.local
+
+# Credentials et tokens spécifiques
+**/fb_access_token.json*
+**/page_tokens.json
+**/service_account_credentials.json
+**/token*.json
+**/access_token*.json
+
+# Fichiers de configuration LinkedIn spécifiques
+linkedin*/organizations_config.json
+linkedin*/organizations_report.json
+linkedin*/sheet_mapping.json
+linkedin_stats_progress.json
+processing_results_*.json
+
+# Python
+**pycache**/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Fichiers temporaires
+*.tmp
+*.bak
+~*
+
+# Résultats de tests
+test_results/
+*.test.json**/pages_config.json

@@ -1,0 +1,29 @@
+# Secrets et tokens
+.env
+fb_access_token.json*
+credentials/
+*.key
+*.pem
+
+# Configs avec tokens de page
+configs/page_tokens.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Reports locaux
+reports/
+
+# Fichiers temporaires
+*.log
+*.tmp
+.DS_Store
+*:Zone.Identifier
+
+# Tests locaux
+test_*.json
+migrated_to_cloud.py
