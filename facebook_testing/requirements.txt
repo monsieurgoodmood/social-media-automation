@@ -1,7 +1,0 @@
-Flask
-pandas
-gspread
-oauth2client
-requests
-schedule
-gunicorn
