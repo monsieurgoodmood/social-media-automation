@@ -81,8 +81,7 @@ def adjust_column_types(df):
 
 def rename_columns(df):
     """
-    Renomme les colonnes du DataFrame pour une meilleure compréhension.
-    Utilise des noms simplifiés et plus courts.
+    Renomme les colonnes du DataFrame - VERSION CORRIGÉE pour posts_metadata
     """
     column_mapping = {
         "post_id": "ID publication",
@@ -93,9 +92,9 @@ def rename_columns(df):
         "full_picture": "Image",
         "author_name": "Auteur",
         "author_id": "ID auteur",
-        "comments_count": "Nbre de commentaires",  # Simplifié avec Nbre
-        "likes_count": "Nbre de J'aime",  # Simplifié avec Nbre
-        "shares_count": "Nbre de partages"  # Simplifié avec Nbre
+        "comments_count": "Nbre de commentaires",  # ✅ COHÉRENT avec les autres
+        "likes_count": "Nbre de J'aime",           # ✅ COHÉRENT avec les autres
+        "shares_count": "Nbre de partages"        # ✅ COHÉRENT avec les autres
     }
     return df.rename(columns=column_mapping)
 

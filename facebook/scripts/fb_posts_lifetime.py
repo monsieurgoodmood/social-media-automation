@@ -181,9 +181,7 @@ def add_calculated_metrics(df):
 
 def rename_columns(df):
     """
-    Renomme les colonnes du DataFrame pour une meilleure compréhension dans Looker Studio.
-    Utilise des noms simplifiés et plus courts.
-    Inclut maintenant les métriques calculées.
+    Renomme les colonnes du DataFrame - VERSION CORRIGÉE pour cohérence
     """
     # D'abord ajouter les métriques calculées
     df = add_calculated_metrics(df)
@@ -196,36 +194,36 @@ def rename_columns(df):
         "media_url": "Lien média",
         "message": "Message",
         
-        # Métriques d'impressions simplifiées
+        # Métriques d'impressions
         "post_impressions": "Affichages publication",
         "post_impressions_organic": "Affichages organiques",
         "post_impressions_paid": "Affichages sponsorisés",
         "post_impressions_viral": "Affichages viraux",
         "post_impressions_fan": "Affichages par fans",
         "post_impressions_nonviral": "Affichages non viraux",
-        "post_impressions_unique": "Visiteurs de la publication",  # Simplifié selon votre demande
+        "post_impressions_unique": "Visiteurs de la publication",
         "post_impressions_organic_unique": "Visiteurs organiques",
         "post_impressions_paid_unique": "Visiteurs via pub",
         "post_impressions_viral_unique": "Visiteurs viraux",
         "post_impressions_nonviral_unique": "Visiteurs non viraux",
         
-        # Réactions simplifiées
-        "post_reactions_like_total": "Nbre de \"J'aime\"",  # Simplifié selon votre demande
-        "post_reactions_love_total": "Nbre de \"J'adore\"",  # Simplifié selon votre demande
-        "post_reactions_wow_total": "Nbre de \"Wow\"",  # Simplifié selon votre demande
-        "post_reactions_haha_total": "Nbre de \"Haha\"",  # Simplifié selon votre demande
-        "post_reactions_sorry_total": "Nbre de \"Triste\"",  # Simplifié selon votre demande
-        "post_reactions_anger_total": "Nbre de \"En colère\"",  # Simplifié selon votre demande
+        # Réactions
+        "post_reactions_like_total": "Nbre de \"J'aime\"",
+        "post_reactions_love_total": "Nbre de \"J'adore\"",
+        "post_reactions_wow_total": "Nbre de \"Wow\"",
+        "post_reactions_haha_total": "Nbre de \"Haha\"",
+        "post_reactions_sorry_total": "Nbre de \"Triste\"",
+        "post_reactions_anger_total": "Nbre de \"En colère\"",
         "post_reactions_by_type_total_like": "Réactions J'aime",
         "post_reactions_by_type_total_love": "Réactions J'adore",
         
-        # Clics simplifiés
-        "post_clicks": "Clics totaux",
+        # Clics - 🔥 CORRECTION CRITIQUE
+        "post_clicks": "Nbre de clics",  # ✅ ÉTAIT "Clics totaux"
         "post_clicks_by_type_other clicks": "Autres clics",
         "post_clicks_by_type_link clicks": "Clics sur liens",
         "post_clicks_by_type_photo view": "Clics sur photos",
         
-        # Métriques vidéo simplifiées
+        # Métriques vidéo
         "post_video_views": "Vues vidéo",
         "post_video_views_organic": "Vues vidéo organiques",
         "post_video_views_paid": "Vues vidéo sponsorisées",
@@ -233,7 +231,7 @@ def rename_columns(df):
         "post_video_views_organic_unique": "Visiteurs vidéo organiques",
         "post_video_views_paid_unique": "Visiteurs vidéo sponsorisés",
         "post_video_views_sound_on": "Vues avec son",
-        "post_video_complete_views_30s": "Vues complètes (30s)",  # Simplifié selon votre demande
+        "post_video_complete_views_30s": "Vues complètes (30s)",
         "post_video_avg_time_watched": "Temps moyen visionné",
         "post_video_view_time": "Durée totale visionnage",
         "post_video_views_by_distribution_type_page_owned": "Vues sur la page",
@@ -241,7 +239,7 @@ def rename_columns(df):
         "post_video_followers": "Nouveaux abonnés vidéo",
         "post_video_social_actions": "Interactions vidéo",
         
-        # Autres métriques simplifiées
+        # Autres métriques
         "post_fan_reach": "Portée fans",
         "post_activity_by_action_type_share": "Partages",
         "post_activity_by_action_type_like": "J'aime sur activité",
@@ -249,11 +247,15 @@ def rename_columns(df):
         "post_activity_by_action_type_unique_like": "J'aime uniques",
         "post_consumptions": "Interactions totales",
         
-        # Métriques calculées simplifiées
-        "taux_de_clic": "Tx de clic (%)",  # Simplifié avec Tx
-        "taux_engagement_complet": "Tx d'engagement (%)",  # Simplifié avec Tx
+        # 🔥 CORRECTIONS CRITIQUES pour les commentaires:
+        "post_activity_by_action_type_comment": "Nbre de commentaires",  # ✅ COHÉRENT
+        "post_activity_by_action_type_unique_comment": "Commentaires uniques",  # ➕ AJOUTÉ
+        
+        # Métriques calculées
+        "taux_de_clic": "Tx de clic (%)",
+        "taux_engagement_complet": "Tx d'engagement (%)",
         "reactions_positives": "Réactions positives",
-        "reactions_negatives": "Réactions négatives", 
+        "reactions_negatives": "Réactions négatives",
         "total_reactions": "Total réactions"
     }
     

@@ -1,5 +1,6 @@
 """
 Classe de base pour la collecte de données Facebook - Version optimisée pour les quotas
+AVEC CORRECTION AUTOMATIQUE DES EN-TÊTES ET APPEND_SHEET_DATA
 """
 import os
 import json
@@ -17,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 class FacebookBaseCollector:
     """
-    Classe de base pour la collecte de données Facebook avec gestion optimisée des quotas Google
+    Classe de base pour la collecte de données Facebook avec gestion optimisée des quotas
+    ET CORRECTION AUTOMATIQUE DES EN-TÊTES
     """
     # Variables de classe pour partager l'état des quotas entre toutes les instances
     _last_api_call_time = 0
@@ -70,6 +72,236 @@ class FacebookBaseCollector:
             self.use_cloud_storage = False
             os.makedirs("configs", exist_ok=True)
     
+    def get_header_corrections_mapping(self):
+        """
+        Retourne les mappings de correction des en-têtes - VERSION COMPLÈTE
+        """
+        return {
+            # Corrections communes à tous les types
+            "Nombre de fans": "Nbre de fans",
+            "Nombre d'abonnés": "Nbre d'abonnés",
+            "Fréquence des impressions": "Fréquence des affichages",
+            "Fréquence impressions": "Fréquence des affichages",
+            
+            # 🔥 CORRECTIONS SPÉCIFIQUES pour posts_lifetime:
+            "Clics totaux": "Nbre de clics",
+            "post_activity_by_action_type_comment": "Nombre de commentaires",
+            "post_activity_by_action_type_unique_comment": "Commentaires uniques",
+            
+            # Corrections supplémentaires pour posts_metadata:
+            "Nombre de commentaires": "Nbre de commentaires",
+            "Nombre de J'aime": "Nbre de J'aime",
+            "Nombre de partages": "Nbre de partages",
+            
+            # Autres corrections communes
+            "Nombre de \"J'aime\"": "Nbre de \"J'aime\"",
+            "Nombre de \"J'adore\"": "Nbre de \"J'adore\"",
+            "Nombre de \"Wow\"": "Nbre de \"Wow\"",
+            "Nombre de \"Haha\"": "Nbre de \"Haha\"",
+            "Nombre de \"Triste\"": "Nbre de \"Triste\"",
+            "Nombre de \"En colère\"": "Nbre de \"En colère\"",
+        }
+    
+    def get_expected_headers_by_type(self, metric_type):
+        """
+        Retourne les en-têtes attendus selon le type de métrique - VERSION CORRIGÉE
+        """
+        if metric_type == "page_metrics":
+            return [
+                "Date",
+                "Affichages de la page",
+                "Visiteurs de la page", 
+                "Affichages non viraux",
+                "Affichages viraux",
+                "Affichages des publications",
+                "Visiteurs de la publication",
+                "Affichages publicitaires",
+                "Affichages organiques",
+                "Visiteurs uniques organiques",
+                "Vues totales de la page",
+                "Nbre de fans",
+                "Nouveaux fans",
+                "Fans perdus",
+                "Total nouveaux fans (payants + organiques)",
+                "Nouveaux fans via pub",
+                "Nouveaux fans organiques",
+                "Nbre d'abonnés",
+                "Nouveaux abonnés",
+                "Désabonnements",
+                "Abonnés uniques du jour",
+                "Vues de vidéos",
+                "Vues uniques de vidéos",
+                "Vues vidéos via pub",
+                "Vues vidéos organiques",
+                "Relectures vidéos",
+                "Temps de visionnage (sec)",
+                "Vues complètes (30s)",
+                "Vues complètes uniques (30s)",
+                "Vues complètes via pub (30s)",
+                "Vues complètes organiques (30s)",
+                "Vues complètes auto (30s)",
+                "Relectures complètes (30s)",
+                "Interactions sur publications",
+                "Actions totales",
+                "Nbre de \"J'aime\"",
+                "Nbre de \"J'adore\"",
+                "Nbre de \"Wow\"",
+                "Nbre de \"Haha\"",
+                "Nbre de \"Triste\"",
+                "Nbre de \"En colère\"",
+                "Tx d'engagement (%)",
+                "Fréquence des affichages",
+                "Actions calculées",
+                "VTR %"
+            ]
+        
+        elif metric_type == "posts_lifetime":
+            # 🎯 BASÉ SUR VOS EN-TÊTES RÉELS:
+            return [
+                "Date de publication",
+                "ID publication",
+                "URL média",
+                "Lien média",
+                "Message",
+                "Affichages publication",
+                "Affichages organiques",
+                "Affichages sponsorisés",
+                "Affichages viraux",
+                "Affichages par fans",
+                "Affichages non viraux",
+                "Visiteurs de la publication",
+                "Visiteurs organiques",
+                "Visiteurs via pub",
+                "Visiteurs viraux",
+                "Visiteurs non viraux",  # 🔄 Repositionné ici selon vos en-têtes
+                "Nbre de \"J'aime\"",
+                "Nbre de \"J'adore\"",
+                "Nbre de \"Wow\"",
+                "Nbre de \"Haha\"",
+                "Nbre de \"Triste\"",
+                "Nbre de \"En colère\"",
+                "Réactions J'aime",
+                "Réactions J'adore",
+                "Nbre de clics",  # 🔥 CORRIGÉ: était "Clics totaux"
+                "Autres clics",
+                "Clics sur liens",
+                "Clics sur photos",
+                "Vues vidéo",
+                "Vues vidéo organiques",
+                "Vues vidéo sponsorisées",
+                "Visiteurs vidéo uniques",
+                "Visiteurs vidéo organiques",
+                "Visiteurs vidéo sponsorisés",
+                "Vues avec son",
+                "Vues complètes (30s)",
+                "Temps moyen visionné",
+                "Vues sur la page",
+                "Vues via partages",
+                "Portée fans",
+                "Durée totale visionnage",
+                "Partages",
+                "J'aime sur activité",
+                "Partages uniques",
+                "J'aime uniques",
+                "Nouveaux abonnés vidéo",
+                "Interactions vidéo",
+                "Interactions totales",
+                "Nbre de commentaires",  # 🔥 CORRIGÉ: était "post_activity_by_action_type_comment"
+                "Commentaires uniques",    # ➕ AJOUTÉ pour "post_activity_by_action_type_unique_comment"
+                "Tx de clic (%)",
+                "Tx d'engagement (%)",
+                "Réactions positives",
+                "Réactions négatives",
+                "Total réactions"
+            ]
+        
+        elif metric_type == "posts_metadata":
+            return [
+                "ID publication",
+                "Date de publication",
+                "Type de publication",
+                "Message",
+                "Lien permanent",
+                "Image",
+                "Auteur",
+                "ID auteur",
+                "Nbre de commentaires",  # 🔥 CORRIGÉ: cohérent avec les autres
+                "Nbre de J'aime",        # 🔥 CORRIGÉ: cohérent avec les autres
+                "Nbre de partages"       # 🔥 CORRIGÉ: cohérent avec les autres
+            ]
+        
+        else:
+            # Type par défaut ou autres types
+            return []
+    
+    def correct_sheet_headers(self, spreadsheet_id, expected_headers, metric_type):
+        """Corrige automatiquement les en-têtes du Google Sheet - VERSION CORRIGÉE"""
+        try:
+            # Lire les en-têtes actuels
+            self._wait_for_quota()
+            result = self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range="Metrics Data!1:1"  # Première ligne uniquement
+            ).execute()
+            
+            current_headers = result.get('values', [[]])[0] if result.get('values') else []
+            
+            if not current_headers:
+                logger.info("Aucun en-tête existant, pas de correction nécessaire")
+                return False
+            
+            logger.info(f"📋 En-têtes actuels: {current_headers}")
+            
+            # Obtenir le mapping de correction
+            correction_mapping = self.get_header_corrections_mapping()
+            
+            # Corriger les en-têtes
+            corrected_headers = []
+            headers_changed = False
+            
+            for header in current_headers:
+                if header in correction_mapping:
+                    corrected_header = correction_mapping[header]
+                    corrected_headers.append(corrected_header)
+                    headers_changed = True
+                    logger.info(f"🔧 Correction: '{header}' → '{corrected_header}'")
+                else:
+                    corrected_headers.append(header)
+            
+            # Vérifier s'il manque des en-têtes attendus
+            for expected_header in expected_headers:
+                if expected_header not in corrected_headers:
+                    # Ajouter seulement si on n'a pas déjà trop de colonnes
+                    if len(corrected_headers) < 50:  # Limite raisonnable
+                        corrected_headers.append(expected_header)
+                        headers_changed = True
+                        logger.info(f"➕ Ajout en-tête manquant: '{expected_header}'")
+            
+            # Appliquer les corrections si nécessaire
+            if headers_changed:
+                logger.info(f"🔄 Mise à jour des en-têtes...")
+                
+                # Mettre à jour les en-têtes
+                update_request = self.sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range="Metrics Data!1:1",
+                    valueInputOption="USER_ENTERED",
+                    body={'values': [corrected_headers]}
+                )
+                self._execute_with_retry(update_request, operation_name="correction des en-têtes")
+                
+                logger.info(f"✅ En-têtes corrigés avec succès!")
+                logger.info(f"🎯 Nouveaux en-têtes: {corrected_headers}")
+                
+                return True
+            else:
+                logger.info("✅ En-têtes déjà corrects, aucune modification nécessaire")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la correction des en-têtes: {e}")
+            return False
+
     def _wait_for_quota(self):
         """Attend si nécessaire pour respecter les quotas"""
         current_time = time.time()
@@ -111,11 +343,18 @@ class FacebookBaseCollector:
             except:
                 mapping_config = {}
 
-        # Si le spreadsheet existe déjà, on retourne tout de suite
+        # Si le spreadsheet existe déjà
         if page_id in mapping_config:
             spreadsheet_id = mapping_config[page_id]["spreadsheet_id"]
             logger.info(f"Spreadsheet existant trouvé pour {page_name} - {metric_type}")
-            return spreadsheet_id  # *** on quitte ici, pas de vérification supplémentaire ***
+            
+            # NOUVEAU: Vérifier et corriger les en-têtes si nécessaire
+            expected_headers = self.get_expected_headers_by_type(metric_type)
+            if expected_headers:
+                logger.info(f"🔍 Vérification des en-têtes pour {metric_type}...")
+                self.correct_sheet_headers(spreadsheet_id, expected_headers, metric_type)
+            
+            return spreadsheet_id
 
         # Si pas existant, on crée le spreadsheet
         spreadsheet_id = self._create_spreadsheet(page_name, metric_type)
@@ -137,7 +376,6 @@ class FacebookBaseCollector:
 
         return spreadsheet_id
 
-    
     def _create_spreadsheet(self, page_name, metric_type):
         """Crée un nouveau spreadsheet avec gestion optimisée des quotas"""
         title = self._get_spreadsheet_title(page_name, metric_type)
@@ -191,12 +429,120 @@ class FacebookBaseCollector:
         except Exception as e:
             logger.warning(f"Impossible d'ajouter le compte de service comme éditeur: {e}")
 
-        
         logger.info(f"Nouveau spreadsheet créé: {spreadsheet_id}")
         return spreadsheet_id
     
+    def append_sheet_data(self, spreadsheet_id, df):
+        """
+        🆕 NOUVELLE MÉTHODE - Ajoute des données à la fin du sheet SANS écraser l'existant
+        """
+        if df.empty:
+            logger.warning("Aucune donnée à ajouter")
+            return
+        
+        try:
+            # 1. D'abord vérifier qu'on a des en-têtes dans le sheet
+            self._wait_for_quota()
+            result = self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range="Metrics Data!1:1"  # Première ligne seulement
+            ).execute()
+            
+            existing_headers = result.get('values', [[]])[0] if result.get('values') else []
+            
+            # 2. Préparer les données SANS les en-têtes (car on ajoute seulement les données)
+            df_clean = df.fillna("")
+            data_rows = []
+            
+            for _, row in df_clean.iterrows():
+                row_values = []
+                for col, val in zip(df_clean.columns, row):
+                    if isinstance(val, datetime):
+                        row_values.append(val.strftime('%Y-%m-%d %H:%M:%S'))
+                    elif isinstance(val, pd.Timestamp):
+                        row_values.append(val.strftime('%Y-%m-%d %H:%M:%S'))
+                    elif isinstance(val, str) and val.startswith('=IMAGE('):
+                        url = val.replace('=IMAGE("', '').replace('")', '')
+                        row_values.append(url)
+                    elif isinstance(val, (int, np.integer)):
+                        row_values.append(int(val))
+                    elif isinstance(val, (float, np.floating)):
+                        row_values.append(float(val))
+                    elif isinstance(val, bool):
+                        row_values.append('TRUE' if val else 'FALSE')
+                    elif val == "" or pd.isna(val):
+                        row_values.append("")
+                    else:
+                        row_values.append(str(val))
+                data_rows.append(row_values)
+            
+            if not data_rows:
+                logger.warning("Aucune ligne de données à ajouter")
+                return
+            
+            # 3. Si pas d'en-têtes existants, on ajoute d'abord les en-têtes
+            if not existing_headers:
+                logger.info("Aucun en-tête existant, ajout des en-têtes d'abord")
+                headers = df_clean.columns.tolist()
+                
+                # Ajouter les en-têtes
+                header_request = self.sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range="Metrics Data!A1",
+                    valueInputOption="USER_ENTERED",
+                    body={'values': [headers]}
+                )
+                self._execute_with_retry(header_request, operation_name="ajout en-têtes")
+                logger.info(f"✅ En-têtes ajoutés: {len(headers)} colonnes")
+                start_row = 2  # Commencer à la ligne 2
+            else:
+                # 4. Trouver la prochaine ligne vide
+                self._wait_for_quota()
+                all_data_result = self.sheets_service.spreadsheets().values().get(
+                    spreadsheetId=spreadsheet_id,
+                    range="Metrics Data!A:A"  # Toute la colonne A
+                ).execute()
+                
+                existing_rows = all_data_result.get('values', [])
+                start_row = len(existing_rows) + 1  # Prochaine ligne vide
+                
+                logger.info(f"📍 Données existantes: {len(existing_rows)} lignes, ajout à partir de la ligne {start_row}")
+            
+            # 5. Ajouter les nouvelles données
+            logger.info(f"📊 Ajout de {len(data_rows)} nouvelles lignes à partir de la ligne {start_row}")
+            
+            # Pour les gros volumes, utiliser des chunks
+            chunk_size = 1000
+            total_rows = len(data_rows)
+            
+            for i in range(0, total_rows, chunk_size):
+                chunk_end = min(i + chunk_size, total_rows)
+                chunk = data_rows[i:chunk_end]
+                current_start_row = start_row + i
+                
+                if total_rows > chunk_size:
+                    logger.info(f"📥 Ajout chunk {i//chunk_size + 1}/{(total_rows-1)//chunk_size + 1} (lignes {current_start_row}-{current_start_row + len(chunk) - 1})")
+                
+                append_request = self.sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"Metrics Data!A{current_start_row}",
+                    valueInputOption="USER_ENTERED",
+                    body={'values': chunk}
+                )
+                self._execute_with_retry(append_request, operation_name=f"append chunk {i//chunk_size + 1}")
+                
+                # Petite pause entre les chunks
+                if chunk_end < total_rows:
+                    time.sleep(1)
+            
+            logger.info(f"✅ {len(data_rows)} nouvelles lignes ajoutées avec succès!")
+            
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'ajout des données: {e}")
+            raise
+    
     def update_sheet_data(self, spreadsheet_id, df):
-        """Met à jour les données avec gestion robuste des gros volumes"""
+        """Met à jour les données avec gestion robuste des gros volumes (ÉCRASE tout)"""
         if df.empty:
             logger.warning("Aucune donnée à uploader")
             return
@@ -251,9 +597,7 @@ class FacebookBaseCollector:
         logger.info(f"Données mises à jour: {len(df)} lignes")
 
     def _update_sheet_batch(self, spreadsheet_id, values):
-        """Mode batch pour petits datasets"""
-        # Diviser en deux requêtes pour éviter les timeouts
-        
+        """Mode batch pour petits datasets - VERSION CORRIGÉE"""
         # D'abord effacer
         clear_request = self.sheets_service.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id,
@@ -269,9 +613,9 @@ class FacebookBaseCollector:
             body={'values': values}
         )
         self._execute_with_retry(update_request, operation_name="batch update")
-
+        
     def _update_sheet_normal_chunked(self, spreadsheet_id, values):
-        """Mode normal avec découpage en chunks pour gros volumes"""
+        """Mode normal avec découpage en chunks pour gros volumes - VERSION CORRIGÉE"""
         # D'abord effacer toute la feuille
         clear_request = self.sheets_service.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id,
@@ -321,9 +665,9 @@ class FacebookBaseCollector:
                 body={'values': values}
             )
             self._execute_with_retry(update_request, operation_name="update values")
-
+            
     def _update_sheet_normal(self, spreadsheet_id, values):
-        """Mode normal standard (gardé pour compatibilité)"""
+        """Mode normal standard - VERSION CORRIGÉE"""
         # Nettoyer la feuille
         clear_request = self.sheets_service.spreadsheets().values().clear(
             spreadsheetId=spreadsheet_id,
@@ -339,7 +683,7 @@ class FacebookBaseCollector:
             body={'values': values}
         )
         self._execute_with_retry(update_request, operation_name="update values")
-
+        
     def _execute_with_retry(self, request, max_retries=7, operation_name=""):
         """Exécute une requête avec gestion des quotas et retry améliorée"""
         base_delay = 2
@@ -512,78 +856,9 @@ class FacebookBaseCollector:
             "spreadsheets": all_spreadsheets
         }
     
-    def handle_api_error(self, error_response, context=""):
-        """
-        Gère les erreurs de l'API Facebook de manière centralisée
-        Retourne True si l'erreur est liée à l'expiration du token
-        """
-        if isinstance(error_response, dict) and "error" in error_response:
-            error = error_response["error"]
-            error_code = error.get("code", 0)
-            error_subcode = error.get("error_subcode", 0)
-            
-            # Code 190 avec subcode 463 = Token expiré
-            if error_code == 190 and error_subcode == 463:
-                logger.error(f"Token expiré détecté {context}: {error.get('message', '')}")
-                return True
-            
-            # Autres erreurs de token
-            if error_code == 190:
-                logger.error(f"Erreur de token {context}: {error.get('message', '')}")
-                return True
-        
-        return False
-    
-    def make_api_request(self, url, params, max_retries=3):
-        """
-        Effectue une requête API avec gestion des erreurs et retry
-        """
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(url, params=params, timeout=30)
-                response.raise_for_status()
-                data = response.json()
-                
-                # Vérifier si c'est une erreur de token
-                if self.handle_api_error(data, f"(tentative {attempt + 1}/{max_retries})"):
-                    # Si on a un token_manager, essayer de rafraîchir
-                    if self.token_manager and attempt < max_retries - 1:
-                        logger.info("Tentative de rafraîchissement du token...")
-                        try:
-                            from utils.token_manager import FacebookTokenManager
-                            tm = FacebookTokenManager()
-                            new_token = tm.get_valid_token()
-                            
-                            # Mettre à jour le token dans les params
-                            params["access_token"] = new_token
-                            self.page_token = new_token
-                            
-                            # Attendre un peu avant de réessayer
-                            time.sleep(2)
-                            continue
-                        except Exception as e:
-                            logger.error(f"Impossible de rafraîchir le token: {e}")
-                    
-                    raise Exception(f"Token expiré: {data['error'].get('message', '')}")
-                
-                return data
-                
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Erreur réseau (tentative {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)  # Backoff exponentiel
-                else:
-                    raise
-            except Exception as e:
-                logger.error(f"Erreur inattendue: {e}")
-                raise
-        
-        raise Exception(f"Échec après {max_retries} tentatives")
-    
-    
     def get_existing_dates(self, spreadsheet_id):
         """
-        Récupère la liste des dates déjà présentes dans le Google Sheet (colonne 'Date')
+        Récupère la liste des dates déjà présentes dans le Google Sheet - VERSION CORRIGÉE
         """
         try:
             self._wait_for_quota()  # Respecter quotas

@@ -12,10 +12,28 @@ service_account_credentials.json
 organizations_config.json
 organizations_report.json
 sheet_mapping.json
+discovery_summary.json
 
-# Fichiers de progression
+# Fichiers de mapping (contiennent des IDs sensibles)
+*_mapping.json
+follower_stats_mapping.json
+page_stats_mapping.json
+post_metrics_mapping.json
+share_stats_mapping.json
+
+# Répertoires de configuration
+configs/
+cloud_config_check/
+
+# Fichiers de progression et état
 linkedin_stats_progress.json
 processing_results_*.json
+batch_state.json
+
+# Logs
+*.log
+logs.txt
+logs/
 
 # Python
 __pycache__/
@@ -27,13 +45,10 @@ venv/
 env/
 ENV/
 
-# Logs
-*.log
-logs/
-
 # OS
 .DS_Store
 Thumbs.db
+*.Zone.Identifier
 
 # IDE
 .idea/
@@ -49,3 +64,10 @@ Thumbs.db
 # Résultats de tests
 test_results/
 *.test.json
+
+# Archives et zips
+*.zip
+function_backup.yaml
+
+# Fichiers d'environnement
+env_vars.yaml

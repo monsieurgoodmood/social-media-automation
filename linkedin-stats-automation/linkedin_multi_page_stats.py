@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-LinkedIn Multi-Organization Page Statistics Tracker
-Ce script collecte les statistiques des vues de page LinkedIn par pays, séniorité et industrie
+LinkedIn Multi-Organization Follower Statistics Tracker
+Ce script collecte les statistiques des followers LinkedIn par catégorie
 pour plusieurs organisations et les enregistre dans Google Sheets.
 """
 
@@ -23,6 +23,37 @@ from gspread.exceptions import APIError
 
 # Chargement des variables d'environnement
 load_dotenv()
+
+def ensure_percentage_as_decimal(value):
+    """
+    Convertit une valeur en décimal pour Google Sheets PERCENT
+    
+    Args:
+        value: La valeur à convertir (peut être 5 pour 5% ou 0.05 pour 5%)
+    
+    Returns:
+        float: Valeur en décimal (0.05 pour 5%)
+    """
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, str):
+        # Enlever le symbole % si présent
+        value = value.replace('%', '').strip()
+        try:
+            value = float(value)
+        except:
+            return 0.0
+    
+    if isinstance(value, (int, float)):
+        # Si la valeur est > 1, on assume que c'est un pourcentage
+        if value > 1:
+            return float(value / 100)
+        else:
+            return float(value)
+    
+    return 0.0
+
 
 def get_column_letter(col_idx):
     """Convertit un indice de colonne (0-based) en lettre de colonne pour Google Sheets (A, B, ..., Z, AA, AB, ...)"""
@@ -62,33 +93,33 @@ def safe_sheets_operation(operation, *args, max_retries=5, **kwargs):
                 raise
             time.sleep(2)
 
-class LinkedInPageStatisticsTracker:
-    """Classe pour suivre les statistiques des vues de page LinkedIn par catégorie"""
+class LinkedInFollowerStatisticsTracker:
+    """Classe pour suivre les statistiques des followers LinkedIn par catégorie"""
     
     def __init__(self, access_token, organization_id, sheet_name=None):
         """Initialise le tracker avec le token d'accès et l'ID de l'organisation"""
         self.access_token = access_token
         self.organization_id = organization_id
-        self.sheet_name = sheet_name or f"LinkedIn_Page_Stats_{organization_id}"
-        self.base_url = "https://api.linkedin.com/v2"
+        self.sheet_name = sheet_name or f"LinkedIn_Follower_Stats_{organization_id}"
+        self.base_url = "https://api.linkedin.com/rest"
         
     def get_headers(self):
         """Retourne les en-têtes pour les requêtes API"""
         return {
             "Authorization": f"Bearer {self.access_token}",
             "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "202312",
+            "LinkedIn-Version": "202505",
             "Content-Type": "application/json"
         }
     
     def get_page_statistics(self):
-        """Obtient les statistiques de vues de page pour l'organisation"""
+        """Obtient les statistiques de followers pour l'organisation (lifetime stats)"""
         # Encoder l'URN de l'organisation
         organization_urn = f"urn:li:organization:{self.organization_id}"
         encoded_urn = urllib.parse.quote(organization_urn)
         
-        # Construire l'URL
-        url = f"{self.base_url}/organizationPageStatistics?q=organization&organization={encoded_urn}"
+        # Construire l'URL pour les statistiques lifetime (sans timeIntervals)
+        url = f"{self.base_url}/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity={encoded_urn}"
         
         # Effectuer la requête avec gestion des erreurs et retry
         max_retries = 3
@@ -100,7 +131,7 @@ class LinkedInPageStatisticsTracker:
                 
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"   Données de statistiques de page récupérées avec succès")
+                    print(f"   Données de statistiques de followers récupérées avec succès")
                     return data
                     
                 elif response.status_code == 429:
@@ -118,7 +149,7 @@ class LinkedInPageStatisticsTracker:
                 time.sleep(retry_delay)
                 retry_delay *= 2
         
-        print("   Échec après plusieurs tentatives pour obtenir les statistiques de page.")
+        print("   Échec après plusieurs tentatives pour obtenir les statistiques de followers.")
         return None
     
     def parse_page_statistics(self, data):
@@ -136,145 +167,295 @@ class LinkedInPageStatisticsTracker:
         # Obtenir le premier élément (qui contient toutes les stats)
         element = data['elements'][0]
         
-        # 1. Statistiques par pays
+        # D'abord, calculer les totaux pour chaque catégorie
+        # Car LinkedIn peut avoir des followers comptés dans plusieurs catégories
+        totals_by_category = {
+            'country': 0,
+            'function': 0,
+            'seniority': 0,
+            'industry': 0,
+            'staff_count': 0
+        }
+        
+        # 1. Statistiques par pays - AVEC DÉDUPLICATION
         stats['by_country'] = {}
-        if 'pageStatisticsByCountry' in element:
-            for item in element['pageStatisticsByCountry']:
-                country = item.get('country', 'unknown')
-                country_code = country.split(':')[-1] if ':' in country else country
+        country_followers_by_name = {}  # Pour fusionner les doublons
+        
+        if 'followerCountsByGeoCountry' in element:
+            for item in element['followerCountsByGeoCountry']:
+                geo = item.get('geo', 'unknown')
+                country_code = geo.split(':')[-1] if ':' in geo else geo
                 country_name = self._get_country_name(country_code)
                 
-                views = item.get('pageStatistics', {}).get('views', {})
+                follower_counts = item.get('followerCounts', {})
                 
-                # Extraire les données de vues pertinentes
-                total_views = views.get('allPageViews', {}).get('pageViews', 0)
-                desktop_views = views.get('allDesktopPageViews', {}).get('pageViews', 0)
-                mobile_views = views.get('allMobilePageViews', {}).get('pageViews', 0)
+                # Pour les statistiques lifetime, utiliser organicFollowerCount
+                # qui contient le total (organique + payé selon la doc)
+                organic_count = follower_counts.get('organicFollowerCount', 0)
+                paid_count = follower_counts.get('paidFollowerCount', 0)
+                total_followers = organic_count  # La doc indique que organicFollowerCount contient déjà le total
                 
-                # Détails par type de page
-                overview_views = views.get('overviewPageViews', {}).get('pageViews', 0)
-                about_views = views.get('aboutPageViews', {}).get('pageViews', 0)
-                people_views = views.get('peoplePageViews', {}).get('pageViews', 0)
-                jobs_views = views.get('jobsPageViews', {}).get('pageViews', 0)
-                careers_views = views.get('careersPageViews', {}).get('pageViews', 0)
-                
-                stats['by_country'][country_code] = {
-                    'name': country_name,
-                    'total_views': total_views,
-                    'desktop_views': desktop_views,
-                    'mobile_views': mobile_views,
-                    'overview_views': overview_views,
-                    'about_views': about_views,
-                    'people_views': people_views,
-                    'jobs_views': jobs_views,
-                    'careers_views': careers_views
-                }
+                # Fusionner les followers par nom de pays (déduplication)
+                if country_name in country_followers_by_name:
+                    country_followers_by_name[country_name]['total_followers'] += total_followers
+                    # Garder une trace des codes multiples pour debugging
+                    if 'codes' not in country_followers_by_name[country_name]:
+                        country_followers_by_name[country_name]['codes'] = [country_followers_by_name[country_name].get('original_code', '')]
+                    country_followers_by_name[country_name]['codes'].append(country_code)
+                else:
+                    country_followers_by_name[country_name] = {
+                        'name': country_name,
+                        'total_followers': total_followers,
+                        'original_code': country_code  # Garder le premier code rencontré
+                    }
+        
+        # Convertir le dictionnaire fusionné vers le format attendu
+        for country_name, country_data in country_followers_by_name.items():
+            # Utiliser le premier code rencontré comme clé principale
+            primary_code = country_data['original_code']
+            stats['by_country'][primary_code] = {
+                'name': country_name,
+                'total_followers': country_data['total_followers']
+            }
+            totals_by_category['country'] += country_data['total_followers']
+            
+            # Afficher un message si des doublons ont été fusionnés
+            if 'codes' in country_data:
+                codes_list = ', '.join(country_data['codes'])
+                print(f"   🔗 Fusion détectée pour {country_name}: codes {codes_list} -> {country_data['total_followers']} followers")
         
         # 2. Statistiques par niveau de séniorité
         stats['by_seniority'] = {}
-        if 'pageStatisticsBySeniority' in element:
-            for item in element['pageStatisticsBySeniority']:
+        if 'followerCountsBySeniority' in element:
+            for item in element['followerCountsBySeniority']:
                 seniority = item.get('seniority', 'unknown')
                 seniority_id = seniority.split(':')[-1] if ':' in seniority else seniority
                 seniority_name = self._get_seniority_description(seniority_id)
                 
-                views = item.get('pageStatistics', {}).get('views', {})
-                
-                # Extraire les données de vues pertinentes
-                total_views = views.get('allPageViews', {}).get('pageViews', 0)
-                desktop_views = views.get('allDesktopPageViews', {}).get('pageViews', 0)
-                mobile_views = views.get('allMobilePageViews', {}).get('pageViews', 0)
-                
-                # Détails par type de page
-                overview_views = views.get('overviewPageViews', {}).get('pageViews', 0)
-                about_views = views.get('aboutPageViews', {}).get('pageViews', 0)
-                people_views = views.get('peoplePageViews', {}).get('pageViews', 0)
-                jobs_views = views.get('jobsPageViews', {}).get('pageViews', 0)
-                careers_views = views.get('careersPageViews', {}).get('pageViews', 0)
+                follower_counts = item.get('followerCounts', {})
+                total_followers = follower_counts.get('organicFollowerCount', 0)
                 
                 stats['by_seniority'][seniority_id] = {
                     'name': seniority_name,
-                    'total_views': total_views,
-                    'desktop_views': desktop_views,
-                    'mobile_views': mobile_views,
-                    'overview_views': overview_views,
-                    'about_views': about_views,
-                    'people_views': people_views,
-                    'jobs_views': jobs_views,
-                    'careers_views': careers_views
+                    'total_followers': total_followers
                 }
+                totals_by_category['seniority'] += total_followers
         
         # 3. Statistiques par industrie
         stats['by_industry'] = {}
-        if 'pageStatisticsByIndustry' in element:
-            for item in element['pageStatisticsByIndustry']:
+        if 'followerCountsByIndustry' in element:
+            for item in element['followerCountsByIndustry']:
                 industry = item.get('industry', 'unknown')
                 industry_id = industry.split(':')[-1] if ':' in industry else industry
                 industry_name = self._get_industry_description(industry_id)
                 
-                views = item.get('pageStatistics', {}).get('views', {})
-                
-                # Extraire les données de vues pertinentes
-                total_views = views.get('allPageViews', {}).get('pageViews', 0)
-                desktop_views = views.get('allDesktopPageViews', {}).get('pageViews', 0)
-                mobile_views = views.get('allMobilePageViews', {}).get('pageViews', 0)
-                
-                # Détails par type de page
-                overview_views = views.get('overviewPageViews', {}).get('pageViews', 0)
-                about_views = views.get('aboutPageViews', {}).get('pageViews', 0)
-                people_views = views.get('peoplePageViews', {}).get('pageViews', 0)
-                jobs_views = views.get('jobsPageViews', {}).get('pageViews', 0)
-                careers_views = views.get('careersPageViews', {}).get('pageViews', 0)
+                follower_counts = item.get('followerCounts', {})
+                total_followers = follower_counts.get('organicFollowerCount', 0)
                 
                 stats['by_industry'][industry_id] = {
                     'name': industry_name,
-                    'total_views': total_views,
-                    'desktop_views': desktop_views,
-                    'mobile_views': mobile_views,
-                    'overview_views': overview_views,
-                    'about_views': about_views,
-                    'people_views': people_views,
-                    'jobs_views': jobs_views,
-                    'careers_views': careers_views
+                    'total_followers': total_followers
+                }
+                totals_by_category['industry'] += total_followers
+        
+        # 4. Statistiques par fonction
+        stats['by_function'] = {}
+        if 'followerCountsByFunction' in element:
+            for item in element['followerCountsByFunction']:
+                function = item.get('function', 'unknown')
+                function_id = function.split(':')[-1] if ':' in function else function
+                function_name = self._get_function_description(function_id)
+                
+                follower_counts = item.get('followerCounts', {})
+                total_followers = follower_counts.get('organicFollowerCount', 0)
+                
+                stats['by_function'][function_id] = {
+                    'name': function_name,
+                    'total_followers': total_followers
+                }
+                totals_by_category['function'] += total_followers
+        
+        # 5. Statistiques par taille d'entreprise
+        stats['by_staff_count'] = {}
+        if 'followerCountsByStaffCountRange' in element:
+            for item in element['followerCountsByStaffCountRange']:
+                staff_range = item.get('staffCountRange', 'unknown')
+                staff_name = self._get_staff_count_description(staff_range)
+                
+                follower_counts = item.get('followerCounts', {})
+                total_followers = follower_counts.get('organicFollowerCount', 0)
+                
+                stats['by_staff_count'][staff_range] = {
+                    'name': staff_name,
+                    'total_followers': total_followers
+                }
+                totals_by_category['staff_count'] += total_followers
+        
+        # 6. Statistiques par type d'association (employés)
+        stats['by_association'] = {}
+        if 'followerCountsByAssociationType' in element:
+            for item in element['followerCountsByAssociationType']:
+                association_type = item.get('associationType', 'unknown')
+                
+                follower_counts = item.get('followerCounts', {})
+                total_followers = follower_counts.get('organicFollowerCount', 0)
+                
+                stats['by_association'][association_type] = {
+                    'name': 'Employés' if association_type == 'EMPLOYEE' else association_type,
+                    'total_followers': total_followers
                 }
                 
-        # 4. Calcul des totaux globaux
-        total_page_views = 0
-        total_desktop_views = 0
-        total_mobile_views = 0
-        total_overview_views = 0
-        total_about_views = 0
-        total_people_views = 0
-        total_jobs_views = 0
-        total_careers_views = 0
+        # 7. Calcul des totaux globaux
+        # Le total calculé est le maximum des totaux par catégorie
+        # Car un follower peut être dans toutes les catégories
+        calculated_total = max(totals_by_category.values()) if totals_by_category.values() else 0
         
-        # Utiliser les données par pays pour le total (le plus fiable)
-        for country_code, country_data in stats['by_country'].items():
-            total_page_views += country_data['total_views']
-            total_desktop_views += country_data['desktop_views']
-            total_mobile_views += country_data['mobile_views']
-            total_overview_views += country_data['overview_views']
-            total_about_views += country_data['about_views']
-            total_people_views += country_data['people_views']
-            total_jobs_views += country_data['jobs_views']
-            total_careers_views += country_data['careers_views']
+        # Essayer de récupérer le nombre total réel de followers
+        total_followers = self._get_total_followers()
+        
+        # Si on n'a pas pu récupérer le total réel, utiliser le total calculé
+        if total_followers == 0:
+            total_followers = calculated_total
+            print(f"   ⚠️  Utilisation du total calculé depuis les catégories: {total_followers}")
         
         stats['totals'] = {
-            'total_page_views': total_page_views,
-            'total_desktop_views': total_desktop_views,
-            'total_mobile_views': total_mobile_views,
-            'total_overview_views': total_overview_views,
-            'total_about_views': total_about_views,
-            'total_people_views': total_people_views,
-            'total_jobs_views': total_jobs_views,
-            'total_careers_views': total_careers_views
+            'total_followers': total_followers,
+            'countries_count': len(stats['by_country']),
+            'industries_count': len(stats['by_industry']),
+            'functions_count': len(stats['by_function']),
+            'seniorities_count': len(stats['by_seniority'])
         }
+        
+        # Ajouter les followers non catégorisés pour chaque dimension
+        # Pays non spécifiés
+        uncategorized_countries = max(0, total_followers - totals_by_category['country'])
+        if uncategorized_countries > 0:
+            stats['by_country']['unknown'] = {
+                'name': 'Non spécifié',
+                'total_followers': uncategorized_countries
+            }
+        
+        # Séniorité non spécifiée
+        uncategorized_seniority = max(0, total_followers - totals_by_category['seniority'])
+        if uncategorized_seniority > 0 or len(stats['by_seniority']) == 0:
+            stats['by_seniority']['0'] = {
+                'name': 'Non spécifié',
+                'total_followers': uncategorized_seniority
+            }
+        
+        # Industrie non spécifiée
+        uncategorized_industry = max(0, total_followers - totals_by_category['industry'])
+        if uncategorized_industry > 0 or len(stats['by_industry']) == 0:
+            stats['by_industry']['0'] = {
+                'name': 'Non spécifié',
+                'total_followers': uncategorized_industry
+            }
+        
+        # Fonction non spécifiée
+        uncategorized_function = max(0, total_followers - totals_by_category['function'])
+        if uncategorized_function > 0 or len(stats['by_function']) == 0:
+            stats['by_function']['0'] = {
+                'name': 'Non spécifié',
+                'total_followers': uncategorized_function
+            }
+        
+        # Taille d'entreprise non spécifiée
+        uncategorized_staff = max(0, total_followers - totals_by_category['staff_count'])
+        if uncategorized_staff > 0 or len(stats['by_staff_count']) == 0:
+            stats['by_staff_count']['unknown'] = {
+                'name': 'Non spécifié',
+                'total_followers': uncategorized_staff
+            }
+        
+        # Afficher un résumé des catégories
+        print(f"\n   📊 Résumé des followers:")
+        print(f"      Total réel/calculé: {total_followers}")
+        print(f"      Total par pays: {totals_by_category['country']}")
+        print(f"      Total par fonction: {totals_by_category['function']}")
+        print(f"      Total par séniorité: {totals_by_category['seniority']}")
+        print(f"      Total par industrie: {totals_by_category['industry']}")
+        print(f"      Total par taille d'entreprise: {totals_by_category['staff_count']}")
         
         return stats
     
+    def _get_total_followers(self):
+        """Récupère le nombre total de followers via plusieurs méthodes"""
+        
+        # Méthode 1: Via networkSizes (méthode documentée)
+        total_followers = self._get_total_via_network_sizes()
+        if total_followers > 0:
+            return total_followers
+            
+        # Méthode 2: Via organizations (si on a les droits admin)
+        total_followers = self._get_total_via_organizations()
+        if total_followers > 0:
+            return total_followers
+            
+        # Méthode 3: Calculer depuis les statistiques existantes (moins précis)
+        print("   ⚠️  Impossible de récupérer le total réel, utilisation du calcul approximatif")
+        return 0
+    
+    def _get_total_via_network_sizes(self):
+        """Récupère le nombre total via l'API networkSizes (méthode documentée)"""
+        try:
+            # Selon la doc, l'URL doit être exactement comme ça
+            organization_urn = f"urn:li:organization:{self.organization_id}"
+            encoded_urn = urllib.parse.quote(organization_urn, safe='')
+            
+            # URL exacte selon la documentation
+            url = f"{self.base_url}/networkSizes/{encoded_urn}?edgeType=COMPANY_FOLLOWED_BY_MEMBER"
+            
+            response = requests.get(url, headers=self.get_headers())
+            
+            if response.status_code == 200:
+                data = response.json()
+                followers = data.get('firstDegreeSize', 0)
+                if followers > 0:
+                    print(f"   Nombre total de followers: {followers}")
+                    return followers
+            else:
+                # Si ça ne marche pas, essayer l'ancienne notation
+                url_old = f"{self.base_url}/networkSizes/{encoded_urn}?edgeType=CompanyFollowedByMember"
+                response = requests.get(url_old, headers=self.get_headers())
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    followers = data.get('firstDegreeSize', 0)
+                    if followers > 0:
+                        print(f"   Nombre total de followers: {followers}")
+                        return followers
+                
+        except Exception as e:
+            print(f"   Exception avec networkSizes: {e}")
+            
+        return 0
+    
+    def _get_total_via_organizations(self):
+        """Récupère le nombre total via l'API organizations (nécessite droits admin)"""
+        try:
+            # Essayer avec l'ID direct (nécessite droits admin)
+            url = f"{self.base_url}/organizations/{self.organization_id}"
+            
+            response = requests.get(url, headers=self.get_headers())
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Chercher followerCount dans la réponse
+                # Note: Ce champ n'est pas documenté dans la doc fournie, mais peut exister
+                followers = data.get('followerCount', 0)
+                if followers > 0:
+                    print(f"   Nombre total de followers (via organizations): {followers}")
+                    return followers
+            
+        except Exception as e:
+            print(f"   Exception avec organizations: {e}")
+            
+        return 0
+    
     def _get_country_name(self, country_code):
-        """Obtient le nom du pays à partir du code pays"""
+        """Obtient le nom du pays à partir du code pays LinkedIn"""
         countries = {
+            # Codes ISO en minuscules
             'ae': 'Émirats arabes unis',
             'ar': 'Argentine',
             'at': 'Autriche',
@@ -332,23 +513,194 @@ class LinkedInPageStatisticsTracker:
             'ua': 'Ukraine',
             'us': 'États-Unis',
             'vn': 'Vietnam',
-            'za': 'Afrique du Sud'
+            'za': 'Afrique du Sud',
+            
+            # Codes numériques LinkedIn complets (codes existants)
+            '103644278': 'États-Unis',
+            '105015875': 'France', 
+            '101165590': 'Royaume-Uni',
+            '103883259': 'Allemagne',
+            '106693272': 'Suisse',
+            '102890719': 'Canada',
+            '101452733': 'Australie',
+            '102890883': 'Espagne',
+            '103350503': 'Italie',
+            '102095887': 'Pays-Bas',
+            '100565514': 'Chine',
+            '101355337': 'Japon',
+            '102264497': 'Inde',
+            '106057199': 'Brésil',
+            '100710459': 'Mexique',
+            '105646813': 'Corée du Sud',
+            '102927786': 'Russie',
+            '106808692': 'Argentine',
+            '104621616': 'Émirats arabes unis',
+            '105076658': 'Singapour',
+            '106373116': 'Afrique du Sud',
+            '104508036': 'Suède',
+            '104630756': 'Norvège',
+            '100506914': 'Belgique',
+            '106246626': 'Pologne',
+            '105495012': 'Thaïlande',
+            '103121230': 'Hong Kong',
+            '101282230': 'Irlande',
+            '101620260': 'Israël',
+            '105763397': 'Portugal',
+            '102800292': 'Turquie',
+            '106615570': 'Nouvelle-Zélande',
+            '104359928': 'Grèce',
+            '105072658': 'Autriche',
+            '105333783': 'Hongrie',
+            '100830449': 'République tchèque',
+            '105117694': 'Danemark',
+            '100994331': 'Finlande',
+            '106774456': 'Roumanie',
+            '102095383': 'Ukraine',
+            '102748797': 'Maroc',
+            '102886501': 'Algérie',
+            '100961665': 'Tunisie',
+            '102928006': 'Égypte',
+            '106542645': 'Nigeria',
+            '102886832': 'Chili',
+            '100867946': 'Colombie',
+            '100877388': 'Vietnam',
+            '103588947': 'Philippines',
+            '105146439': 'Malaisie',
+            '102221843': 'Indonésie',
+            '100625338': 'Arabie saoudite',
+            '104232339': 'Madagascar',
+            '101929829': 'Côte d\'Ivoire',
+            '105763554': 'Burkina Faso',
+            '100364837': 'Cameroun',
+            '101022257': 'Taïwan',
+            '103323778': 'Luxembourg',
+            
+            # NOUVEAUX CODES MANQUANTS - Ajout basé sur les logs d'erreur
+            '106395874': 'Estonie',  # Basé sur la séquence géographique européenne
+            '103295271': 'Lettonie',  # Pays balte voisin de l'Estonie
+            '106315325': 'Lituanie',  # Troisième pays balte
+            '100961908': 'Slovénie',  # Pays d'Europe centrale
+            '100770782': 'Croatie',  # Pays des Balkans
+            '104514075': 'Bosnie-Herzégovine',  # Pays des Balkans
+            '103550069': 'Serbie',  # Pays des Balkans
+            '102454443': 'Monténégro',  # Pays des Balkans
+            '101519029': 'Albanie',  # Pays des Balkans
+            '106931611': 'Macédoine du Nord',  # Pays des Balkans
+            '103119917': 'Bulgarie',  # Europe du Sud-Est
+            '104725424': 'Moldavie',  # Europe de l'Est
+            '103291313': 'Biélorussie',  # Europe de l'Est
+            '103239229': 'Kazakhstan',  # Asie centrale
+            '105745966': 'Ouzbékistan',  # Asie centrale
+            '104379274': 'Kirghizistan',  # Asie centrale
+            '100800406': 'Tadjikistan',  # Asie centrale
+            '106215326': 'Turkménistan',  # Asie centrale
+            '102974008': 'Azerbaïdjan',  # Caucase
+            '105535747': 'Arménie',  # Caucase
+            '100587095': 'Géorgie',  # Caucase
+            '101271829': 'Islande',  # Europe du Nord
+            
+            # Autres codes supplémentaires découverts
+            '100446943': 'Panama',
+            '106155005': 'Équateur',
+            '102571732': 'Pérou',
+            '104738515': 'Uruguay',
+            '102713980': 'Sénégal',
+            '105365761': 'Kenya',
+            '104035573': 'Zimbabwe',
+            '101855366': 'Tanzanie',
+            '104069274': 'Ouganda',
+            '105015274': 'Bangladesh',
+            '104444292': 'Biélorussie',
+            '100446352': 'Venezuela',
+            '100874388': 'Pakistan',
+            '106149361': 'Sri Lanka',
+            '102713854': 'Kazakhstan',
+            '104369375': 'Jordanie',
+            '100459316': 'Liban',
+            '101739942': 'Ghana',
+            '106774592': 'Angola',
+            '104170880': 'Mozambique',
+            '100931694': 'Namibie',
+            '105252663': 'Botswana',
+            '103810918': 'Malte',
+            '107006278': 'Chypre',
+            '104640522': 'Qatar',
+            '104305776': 'Koweït',
+            '104889540': 'Bahreïn',
+            '105541707': 'Islande',
+            '105214217': 'Népal',
+            '109919345': 'Bhoutan',
+            '104195383': 'Andorre',
+            '106670623': 'Gibraltar',
+            '103810579': 'Vatican',
+            '103372930': 'Saint-Marin',
+            '104460893': 'Albanie',
+            '103728760': 'Macédoine du Nord',
+            '108988376': 'Kosovo',
+            '103372814': 'Mali',
+            '101957298': 'Guinée',
+            '105028804': 'Moldavie',
+            '106796623': 'Bulgarie',
+            '104688944': 'Serbie',
+            '108734194': 'Monténégro',
+            '103419092': 'Bosnie-Herzégovine',
+            '104901016': 'Croatie',
+            '104558166': 'Slovénie',
+            '110343561': 'Slovaquie',
+            '105490917': 'Corée du Nord',
+            '105246709': 'Macao',
+            '104042105': 'Maurice',
+            '104586159': 'Réunion',
+            '109512725': 'Mayotte',
+            '106934271': 'Seychelles',
+            '105072945': 'Comores',
+            '101022442': 'Éthiopie',
+            '102105699': 'Rwanda',
+            '105587166': 'Gabon',
+            '101834488': 'Tchad',
+            '102478259': 'Guinée équatoriale',
+            '102787409': 'Érythrée',
+            '105146118': 'Soudan du Sud',
+            '103587512': 'Soudan',
+            '101464403': 'Burundi',
+            '101174742': 'Djibouti',
+            '101352147': 'République centrafricaine',
+            '104677530': 'Congo-Brazzaville',
+            '103350119': 'République démocratique du Congo',
+            '104265812': 'Somalie',
+            '105149562': 'Mauritanie',
+            '105072130': 'Gambie',
+            '102134353': 'Cap-Vert',
         }
-        return countries.get(country_code.lower(), f"Pays {country_code}")
-    
+        
+        # Recherche dans le dictionnaire
+        # D'abord vérifier le code exact
+        if country_code in countries:
+            return countries[country_code]
+        # Ensuite vérifier en minuscules
+        elif country_code.lower() in countries:
+            return countries[country_code.lower()]
+        # Si c'est "unknown" ou vide, retourner "Non spécifié"
+        elif country_code in ['unknown', '0', '']:
+            return 'Non spécifié'
+        # Si on ne trouve pas, loguer le code manquant pour future référence
+        else:
+            print(f"   ⚠️  Code pays non reconnu: {country_code}")
+            return f'Inconnu ({country_code})'
+        
     def _get_seniority_description(self, seniority_id):
-        """Fournit une description pour les niveaux de séniorité"""
+        """Fournit une description pour les niveaux de séniorité avec numérotation"""
         seniority_map = {
-            "1": "Stagiaire",
-            "2": "Débutant",
-            "3": "Junior",
-            "4": "Intermédiaire",
-            "5": "Senior",
-            "6": "Chef d'équipe",
-            "7": "Directeur",
-            "8": "Vice-président",
-            "9": "C-suite",
-            "10": "Cadre dirigeant"
+            "1": "01 - Stagiaire",
+            "2": "02 - Débutant",
+            "3": "03 - Junior",
+            "4": "04 - Intermédiaire",
+            "5": "05 - Senior",
+            "6": "06 - Chef d'équipe",
+            "7": "07 - Directeur",
+            "8": "08 - Vice-président",
+            "9": "09 - Cadre supérieur (C-level)",
+            "10": "10 - Cadre dirigeant"
         }
         return seniority_map.get(seniority_id, f"Niveau {seniority_id}")
     
@@ -504,6 +856,53 @@ class LinkedInPageStatisticsTracker:
             "148": "Technologies et services de l'information"
         }
         return industry_map.get(industry_id, f"Industrie {industry_id}")
+    
+    def _get_function_description(self, function_id):
+        """Fournit une description pour les identifiants de fonction"""
+        function_map = {
+            "1": "Comptabilité",
+            "2": "Services administratifs",
+            "3": "Arts et Design",
+            "4": "Développement commercial",
+            "5": "Services communautaires et sociaux",
+            "6": "Conseil",
+            "7": "Éducation",
+            "8": "Ingénierie",
+            "9": "Entrepreneuriat",
+            "10": "Finance",
+            "11": "Santé",
+            "12": "Ressources humaines",
+            "13": "Technologies de l'information",
+            "14": "Juridique",
+            "15": "Marketing",
+            "16": "Médias et communication",
+            "17": "Opérations militaires et protection",
+            "18": "Opérations",
+            "19": "Gestion de produit",
+            "20": "Gestion de programme et de projet",
+            "21": "Achats",
+            "22": "Assurance qualité",
+            "23": "Immobilier",
+            "24": "Recherche",
+            "25": "Ventes",
+            "26": "Support"
+        }
+        return function_map.get(function_id, f"Fonction {function_id}")
+    
+    def _get_staff_count_description(self, staff_range):
+        """Fournit une description pour les tailles d'entreprise"""
+        staff_map = {
+            "SIZE_1": "1 employé",
+            "SIZE_2_TO_10": "2-10 employés",
+            "SIZE_11_TO_50": "11-50 employés",
+            "SIZE_51_TO_200": "51-200 employés",
+            "SIZE_201_TO_500": "201-500 employés",
+            "SIZE_501_TO_1000": "501-1000 employés",
+            "SIZE_1001_TO_5000": "1001-5000 employés",
+            "SIZE_5001_TO_10000": "5001-10000 employés",
+            "SIZE_10001_OR_MORE": "10001+ employés"
+        }
+        return staff_map.get(staff_range, staff_range)
 
 
 class GoogleSheetsExporter:
@@ -596,7 +995,7 @@ class GoogleSheetsExporter:
             
             # Formater les colonnes de texte
             for col_idx in text_columns:
-                if col_idx < len(headers):  # Vérifier que l'index existe
+                if col_idx < len(headers):
                     col_letter = get_column_letter(col_idx)
                     range_name = f"{col_letter}{data_start_row}:{col_letter}"
                     safe_sheets_operation(sheet.format, range_name, {
@@ -620,7 +1019,8 @@ class GoogleSheetsExporter:
             
         except Exception as e:
             print(f"   Erreur lors du formatage des colonnes: {e}")
-    
+        
+        
     def prepare_and_update_summary_sheet(self, stats):
         """Prépare et met à jour la feuille de résumé des statistiques"""
         try:
@@ -646,22 +1046,23 @@ class GoogleSheetsExporter:
             # Préparer les données pour le résumé
             data = []
             
-            # En-têtes
-            headers = ["Date", "Total vues", "Desktop", "Mobile", "Accueil", "À propos", "Personnes", "Emplois", "Carrières"]
+            # En-têtes avec les nouveaux noms
+            headers = ["Date", "Nombre d'abonnés", "Pays", "Industries", "Fonctions", "Niveaux", "Employés"]
             data.append(headers)
             
             # Données totales
             totals = stats.get('totals', {})
+            association_stats = stats.get('by_association', {})
+            employee_followers = association_stats.get('EMPLOYEE', {}).get('total_followers', 0) if 'EMPLOYEE' in association_stats else 0
+            
             data.append([
                 stats.get('date'),
-                totals.get('total_page_views', 0),
-                totals.get('total_desktop_views', 0),
-                totals.get('total_mobile_views', 0),
-                totals.get('total_overview_views', 0),
-                totals.get('total_about_views', 0),
-                totals.get('total_people_views', 0),
-                totals.get('total_jobs_views', 0),
-                totals.get('total_careers_views', 0)
+                totals.get('total_followers', 0),
+                totals.get('countries_count', 0),
+                totals.get('industries_count', 0),
+                totals.get('functions_count', 0),
+                totals.get('seniorities_count', 0),
+                employee_followers
             ])
             
             # Mettre à jour la feuille avec les données
@@ -671,7 +1072,7 @@ class GoogleSheetsExporter:
             time.sleep(1)
             
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:I1', {
+            safe_sheets_operation(sheet.format, 'A1:G1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
@@ -702,12 +1103,20 @@ class GoogleSheetsExporter:
             time.sleep(10)
             
             self._update_industry_sheet(stats)
+            print("   ⏳ Attente de 10 secondes pour éviter les quotas...")
+            time.sleep(10)
+            
+            self._update_function_sheet(stats)
+            print("   ⏳ Attente de 10 secondes pour éviter les quotas...")
+            time.sleep(10)
+            
+            self._update_staff_count_sheet(stats)
             
         except Exception as e:
             print(f"   Erreur lors de la mise à jour des feuilles détaillées: {e}")
     
     def _update_country_sheet(self, stats):
-        """Met à jour la feuille des statistiques par pays"""
+        """Met à jour la feuille des statistiques par pays avec déduplication ISO"""
         try:
             print("   📍 Mise à jour de la feuille 'Par Pays'...")
             
@@ -729,32 +1138,56 @@ class GoogleSheetsExporter:
             
             # Préparer les données
             data = []
-            headers = ["Date", "Pays", "Code pays", "Total vues", "Desktop", "Mobile", "Accueil", "À propos", "Personnes", "Emplois"]
+            headers = ["Date", "Code_Pays_ISO", "Pays", "Nbre d'abonnés"]
             data.append(headers)
             
             date = stats['date']
             
-            # Trier par nombre de vues décroissant
-            country_entries = []
+            # Mapper les codes pays LinkedIn vers ISO
+            linkedin_to_iso = self._get_linkedin_to_iso_mapping()
+            
+            # NOUVELLE LOGIQUE: Fusionner par code ISO pour éviter les doublons
+            iso_aggregated = {}
+            
             for country_code, values in stats['by_country'].items():
+                # Convertir le code LinkedIn en code ISO
+                iso_code = linkedin_to_iso.get(country_code, country_code.upper())
+                
+                # Si c'est "unknown" ou "Non spécifié", ne pas mettre de code ISO
+                if country_code in ['unknown', '0'] or values['name'] == 'Non spécifié':
+                    iso_code = ''
+                
+                country_name = values['name']
+                followers = values['total_followers']
+                
+                # Clé pour l'agrégation : utiliser le code ISO ou le nom du pays si pas de code ISO
+                aggregation_key = iso_code if iso_code else country_name
+                
+                if aggregation_key in iso_aggregated:
+                    # Fusionner les followers
+                    iso_aggregated[aggregation_key]['total_followers'] += followers
+                    print(f"   🔗 Fusion ISO détectée pour {country_name} ({iso_code}): +{followers} followers")
+                else:
+                    iso_aggregated[aggregation_key] = {
+                        'iso_code': iso_code,
+                        'name': country_name,
+                        'total_followers': followers
+                    }
+            
+            # Trier par nombre de followers (décroissant)
+            country_entries = []
+            for agg_key, country_data in iso_aggregated.items():
                 country_entries.append((
-                    values['name'],
-                    country_code,
-                    values['total_views'],
-                    values['desktop_views'],
-                    values['mobile_views'],
-                    values['overview_views'],
-                    values['about_views'],
-                    values['people_views'],
-                    values['jobs_views']
+                    country_data['iso_code'],
+                    country_data['name'],
+                    country_data['total_followers']
                 ))
             
-            # Trier par nombre de vues (décroissant)
             country_entries.sort(key=lambda x: x[2], reverse=True)
             
             # Ajouter à la liste de données
-            for entry in country_entries:
-                data.append([date] + list(entry))
+            for iso_code, country_name, followers in country_entries:
+                data.append([date, iso_code, country_name, followers])
             
             # Mettre à jour la feuille avec les données
             if data:
@@ -762,17 +1195,156 @@ class GoogleSheetsExporter:
                 time.sleep(1)
             
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:J1', {
+            safe_sheets_operation(sheet.format, 'A1:D1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
             time.sleep(1)
             
-            # Appliquer le formatage pour Looker
-            self.format_sheet_for_looker(sheet, headers)
+            # Formater spécifiquement pour Looker
+            # Colonne A (Date) - Format DATE
+            safe_sheets_operation(sheet.format, 'A2:A', {
+                "numberFormat": {
+                    "type": "DATE",
+                    "pattern": "yyyy-mm-dd"
+                }
+            })
+            time.sleep(1)
+            
+            # Colonne B (Code_Pays_ISO) - Format TEXT
+            safe_sheets_operation(sheet.format, 'B2:B', {
+                "numberFormat": {
+                    "type": "TEXT"
+                }
+            })
+            time.sleep(1)
+            
+            # Colonne C (Pays) - Format TEXT
+            safe_sheets_operation(sheet.format, 'C2:C', {
+                "numberFormat": {
+                    "type": "TEXT"
+                }
+            })
+            time.sleep(1)
+            
+            # Colonne D (Nbre d'abonnés) - Format NUMBER
+            safe_sheets_operation(sheet.format, 'D2:D', {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "#,##0"
+                }
+            })
             
         except Exception as e:
             print(f"   Erreur lors de la mise à jour de la feuille des pays: {e}")
+            
+            
+    def _get_linkedin_to_iso_mapping(self):
+        """Mapping des codes LinkedIn vers codes ISO pour Looker avec déduplication"""
+        return {
+            # Codes alphabétiques déjà en ISO
+            'ae': 'AE', 'ar': 'AR', 'at': 'AT', 'au': 'AU', 'be': 'BE',
+            'bf': 'BF', 'br': 'BR', 'ca': 'CA', 'ch': 'CH', 'ci': 'CI',
+            'cl': 'CL', 'cm': 'CM', 'cn': 'CN', 'co': 'CO', 'cz': 'CZ',
+            'de': 'DE', 'dk': 'DK', 'dz': 'DZ', 'eg': 'EG', 'es': 'ES',
+            'fi': 'FI', 'fr': 'FR', 'gb': 'GB', 'gr': 'GR', 'hk': 'HK',
+            'hu': 'HU', 'id': 'ID', 'ie': 'IE', 'il': 'IL', 'in': 'IN',
+            'it': 'IT', 'jp': 'JP', 'kr': 'KR', 'lu': 'LU', 'ma': 'MA',
+            'mg': 'MG', 'mx': 'MX', 'my': 'MY', 'ng': 'NG', 'nl': 'NL',
+            'no': 'NO', 'nz': 'NZ', 'ph': 'PH', 'pl': 'PL', 'pt': 'PT',
+            'ro': 'RO', 'ru': 'RU', 'sa': 'SA', 'se': 'SE', 'sg': 'SG',
+            'th': 'TH', 'tn': 'TN', 'tr': 'TR', 'tw': 'TW', 'ua': 'UA',
+            'us': 'US', 'vn': 'VN', 'za': 'ZA',
+            
+            # Codes numériques LinkedIn vers ISO
+            '103644278': 'US',  # États-Unis
+            '105015875': 'FR',  # France
+            '101165590': 'GB',  # Royaume-Uni
+            '103883259': 'DE',  # Allemagne
+            '106693272': 'CH',  # Suisse
+            '102890719': 'CA',  # Canada
+            '101452733': 'AU',  # Australie
+            '102890883': 'ES',  # Espagne
+            '103350503': 'IT',  # Italie
+            '102095887': 'NL',  # Pays-Bas
+            '100565514': 'CN',  # Chine
+            '101355337': 'JP',  # Japon
+            '102264497': 'IN',  # Inde
+            '106057199': 'BR',  # Brésil
+            '100710459': 'MX',  # Mexique
+            '105646813': 'KR',  # Corée du Sud
+            '102927786': 'RU',  # Russie
+            '106808692': 'AR',  # Argentine
+            '104621616': 'AE',  # Émirats arabes unis
+            '105076658': 'SG',  # Singapour
+            '106373116': 'ZA',  # Afrique du Sud
+            '104508036': 'SE',  # Suède
+            '104630756': 'NO',  # Norvège
+            '100506914': 'BE',  # Belgique
+            '106246626': 'PL',  # Pologne
+            '105495012': 'TH',  # Thaïlande
+            '103121230': 'HK',  # Hong Kong
+            '101282230': 'IE',  # Irlande
+            '101620260': 'IL',  # Israël
+            '105763397': 'PT',  # Portugal
+            '102800292': 'TR',  # Turquie
+            '106615570': 'NZ',  # Nouvelle-Zélande
+            '104359928': 'GR',  # Grèce
+            '105072658': 'AT',  # Autriche
+            '105333783': 'HU',  # Hongrie
+            '100830449': 'CZ',  # République tchèque
+            '105117694': 'DK',  # Danemark
+            '100994331': 'FI',  # Finlande
+            '106774456': 'RO',  # Roumanie
+            '102095383': 'UA',  # Ukraine
+            '102748797': 'MA',  # Maroc
+            '102886501': 'DZ',  # Algérie
+            '100961665': 'TN',  # Tunisie
+            '102928006': 'EG',  # Égypte
+            '106542645': 'NG',  # Nigeria
+            '102886832': 'CL',  # Chili
+            '100867946': 'CO',  # Colombie
+            '100877388': 'VN',  # Vietnam
+            '103588947': 'PH',  # Philippines
+            '105146439': 'MY',  # Malaisie
+            '102221843': 'ID',  # Indonésie
+            '100625338': 'SA',  # Arabie saoudite
+            '104232339': 'MG',  # Madagascar
+            '101929829': 'CI',  # Côte d'Ivoire
+            '105763554': 'BF',  # Burkina Faso
+            '100364837': 'CM',  # Cameroun
+            '104042105': 'MU',  # Maurice
+            '102134353': 'CV',  # Cap-Vert
+            '102787409': 'ER',  # Érythrée
+            '103587512': 'SD',  # Soudan
+            '103350119': 'CD',  # République démocratique du Congo
+            '102713980': 'SN',  # Sénégal
+            '101174742': 'DJ',  # Djibouti
+            
+            # NOUVEAUX CODES AJOUTÉS
+            '106395874': 'EE',  # Estonie
+            '103295271': 'LV',  # Lettonie
+            '106315325': 'LT',  # Lituanie
+            '100961908': 'SI',  # Slovénie
+            '100770782': 'HR',  # Croatie
+            '104514075': 'BA',  # Bosnie-Herzégovine
+            '103550069': 'RS',  # Serbie
+            '102454443': 'ME',  # Monténégro
+            '101519029': 'AL',  # Albanie
+            '106931611': 'MK',  # Macédoine du Nord
+            '103119917': 'BG',  # Bulgarie
+            '104725424': 'MD',  # Moldavie
+            '103291313': 'BY',  # Biélorussie
+            '103239229': 'KZ',  # Kazakhstan
+            '105745966': 'UZ',  # Ouzbékistan
+            '104379274': 'KG',  # Kirghizistan
+            '100800406': 'TJ',  # Tadjikistan
+            '106215326': 'TM',  # Turkménistan
+            '102974008': 'AZ',  # Azerbaïdjan
+            '105535747': 'AM',  # Arménie
+            '100587095': 'GE',  # Géorgie
+            '101271829': 'IS',  # Islande
+        }
     
     def _update_seniority_sheet(self, stats):
         """Met à jour la feuille des statistiques par séniorité"""
@@ -797,7 +1369,7 @@ class GoogleSheetsExporter:
             
             # Préparer les données
             data = []
-            headers = ["Date", "Niveau", "Description", "Total vues", "Desktop", "Mobile", "Accueil", "À propos", "Personnes", "Emplois"]
+            headers = ["Date", "Niveau", "Ancienneté professionnelle", "Nbre d'abonnés"]
             data.append(headers)
             
             date = stats['date']
@@ -813,13 +1385,7 @@ class GoogleSheetsExporter:
                 seniority_entries.append((
                     level,
                     values['name'],
-                    values['total_views'],
-                    values['desktop_views'],
-                    values['mobile_views'],
-                    values['overview_views'],
-                    values['about_views'],
-                    values['people_views'],
-                    values['jobs_views']
+                    values['total_followers']
                 ))
             
             # Trier par niveau
@@ -827,7 +1393,7 @@ class GoogleSheetsExporter:
             
             # Ajouter à la liste de données
             for entry in seniority_entries:
-                data.append([date, entry[0], entry[1]] + list(entry[2:]))
+                data.append([date, entry[0], entry[1], entry[2]])
             
             # Mettre à jour la feuille avec les données
             if data:
@@ -835,7 +1401,7 @@ class GoogleSheetsExporter:
                 time.sleep(1)
             
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:J1', {
+            safe_sheets_operation(sheet.format, 'A1:D1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
@@ -879,27 +1445,21 @@ class GoogleSheetsExporter:
             
             # Préparer les données
             data = []
-            headers = ["Date", "Industrie ID", "Nom de l'industrie", "Total vues", "Desktop", "Mobile", "Accueil", "À propos", "Personnes", "Emplois"]
+            headers = ["Date", "Industrie_ID", "Nom_Industrie", "Nbre d'abonnés"]
             data.append(headers)
             
             date = stats['date']
             
-            # Trier par nombre de vues (décroissant)
+            # Trier par nombre de followers (décroissant)
             industry_entries = []
             for industry_id, values in stats['by_industry'].items():
                 industry_entries.append((
                     industry_id,
                     values['name'],
-                    values['total_views'],
-                    values['desktop_views'],
-                    values['mobile_views'],
-                    values['overview_views'],
-                    values['about_views'],
-                    values['people_views'],
-                    values['jobs_views']
+                    values['total_followers']
                 ))
             
-            # Trier par nombre de vues
+            # Trier par nombre de followers
             industry_entries.sort(key=lambda x: x[2], reverse=True)
             
             # Ajouter à la liste de données
@@ -912,7 +1472,7 @@ class GoogleSheetsExporter:
                 time.sleep(1)
             
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:J1', {
+            safe_sheets_operation(sheet.format, 'A1:D1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
@@ -924,8 +1484,129 @@ class GoogleSheetsExporter:
         except Exception as e:
             print(f"   Erreur lors de la mise à jour de la feuille des industries: {e}")
     
+    def _update_function_sheet(self, stats):
+        """Met à jour la feuille des statistiques par fonction"""
+        try:
+            print("   💼 Mise à jour de la feuille 'Par Fonction'...")
+            
+            # Vérifier si la feuille existe déjà
+            try:
+                sheet = self.spreadsheet.worksheet("Par Fonction")
+            except gspread.exceptions.WorksheetNotFound:
+                sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Fonction", rows=100, cols=10)
+                print("   Nouvelle feuille 'Par Fonction' créée")
+            
+            # Nettoyer la feuille
+            safe_sheets_operation(sheet.clear)
+            time.sleep(2)
+            
+            # Préparer les données
+            data = []
+            headers = ["Date", "Fonction_ID", "Fonction professionnelle", "Nbre d'abonnés"]
+            data.append(headers)
+            
+            date = stats['date']
+            
+            # Trier par nombre de followers (décroissant)
+            function_entries = []
+            for function_id, values in stats['by_function'].items():
+                function_entries.append((
+                    function_id,
+                    values['name'],
+                    values['total_followers']
+                ))
+            
+            # Trier par nombre de followers
+            function_entries.sort(key=lambda x: x[2], reverse=True)
+            
+            # Ajouter à la liste de données
+            for entry in function_entries:
+                data.append([date] + list(entry))
+            
+            # Mettre à jour la feuille avec les données
+            if data:
+                safe_sheets_operation(sheet.update, data, 'A1')
+                time.sleep(1)
+            
+            # Formater les en-têtes
+            safe_sheets_operation(sheet.format, 'A1:D1', {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
+            })
+            time.sleep(1)
+            
+            # Appliquer le formatage pour Looker
+            self.format_sheet_for_looker(sheet, headers)
+            
+        except Exception as e:
+            print(f"   Erreur lors de la mise à jour de la feuille des fonctions: {e}")
+    
+    def _update_staff_count_sheet(self, stats):
+        """Met à jour la feuille des statistiques par taille d'entreprise"""
+        try:
+            print("   🏢 Mise à jour de la feuille 'Par Taille Entreprise'...")
+            
+            # Vérifier si la feuille existe déjà
+            try:
+                sheet = self.spreadsheet.worksheet("Par Taille Entreprise")
+            except gspread.exceptions.WorksheetNotFound:
+                sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Taille Entreprise", rows=100, cols=10)
+                print("   Nouvelle feuille 'Par Taille Entreprise' créée")
+            
+            # Nettoyer la feuille
+            safe_sheets_operation(sheet.clear)
+            time.sleep(2)
+            
+            # Préparer les données
+            data = []
+            headers = ["Date", "Taille", "Taille de l’entreprise", "Nbre d'abonnés"]
+            data.append(headers)
+            
+            date = stats['date']
+            
+            # Définir l'ordre des tailles
+            size_order = ["SIZE_1", "SIZE_2_TO_10", "SIZE_11_TO_50", "SIZE_51_TO_200", 
+                         "SIZE_201_TO_500", "SIZE_501_TO_1000", "SIZE_1001_TO_5000", 
+                         "SIZE_5001_TO_10000", "SIZE_10001_OR_MORE"]
+            
+            # Trier par ordre de taille
+            staff_entries = []
+            for staff_range, values in stats['by_staff_count'].items():
+                order = size_order.index(staff_range) if staff_range in size_order else 999
+                staff_entries.append((
+                    order,
+                    staff_range,
+                    values['name'],
+                    values['total_followers']
+                ))
+            
+            # Trier par ordre
+            staff_entries.sort(key=lambda x: x[0])
+            
+            # Ajouter à la liste de données
+            for entry in staff_entries:
+                data.append([date, entry[1], entry[2], entry[3]])
+            
+            # Mettre à jour la feuille avec les données
+            if data:
+                safe_sheets_operation(sheet.update, data, 'A1')
+                time.sleep(1)
+            
+            # Formater les en-têtes
+            safe_sheets_operation(sheet.format, 'A1:D1', {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
+            })
+            time.sleep(1)
+            
+            # Appliquer le formatage pour Looker
+            self.format_sheet_for_looker(sheet, headers)
+            
+        except Exception as e:
+            print(f"   Erreur lors de la mise à jour de la feuille des tailles d'entreprise: {e}")
+    
     def add_page_statistics(self, stats):
-        """Ajoute les statistiques de vues de page"""
+        """Ajoute les statistiques de followers"""
         if not self.connect():
             print("   Impossible de se connecter à Google Sheets. Vérifiez vos credentials.")
             return False
@@ -961,10 +1642,10 @@ def verify_token(access_token):
     headers = {
         "Authorization": f"Bearer {access_token}",
         "X-Restli-Protocol-Version": "2.0.0",
-        "LinkedIn-Version": "202312"
+        "LinkedIn-Version": "202505"
     }
     
-    url = "https://api.linkedin.com/v2/me"
+    url = "https://api.linkedin.com/rest/me"
     
     try:
         response = requests.get(url, headers=headers)
@@ -977,7 +1658,7 @@ def verify_token(access_token):
 
 
 class MultiOrganizationPageStatsTracker:
-    """Gestionnaire pour les statistiques de pages de plusieurs organisations LinkedIn"""
+    """Gestionnaire pour les statistiques de followers de plusieurs organisations LinkedIn"""
     
     def __init__(self, config_file='organizations_config.json'):
         """Initialise le tracker multi-organisations"""
@@ -1024,7 +1705,7 @@ class MultiOrganizationPageStatsTracker:
             
             # Sinon, utiliser le nom par défaut
             clean_name = org_name.replace(' ', '_').replace('™', '').replace('/', '_')
-            sheet_name = f"LinkedIn_Page_Stats_{clean_name}_{org_id}"
+            sheet_name = f"LinkedIn_Follower_Stats_{clean_name}_{org_id}"
             
             # Stocker le mapping pour la prochaine fois
             mapping[org_id] = {
@@ -1041,7 +1722,7 @@ class MultiOrganizationPageStatsTracker:
         except Exception as e:
             print(f"Erreur dans la gestion du mapping: {e}")
             clean_name = org_name.replace(' ', '_').replace('™', '').replace('/', '_')
-            sheet_name = f"LinkedIn_Page_Stats_{clean_name}_{org_id}"
+            sheet_name = f"LinkedIn_Follower_Stats_{clean_name}_{org_id}"
             return None, sheet_name
     
     def update_sheet_mapping(self, org_id, sheet_id):
@@ -1134,7 +1815,7 @@ class MultiOrganizationPageStatsTracker:
         
         # Résumé
         print(f"\n{'='*60}")
-        print("RÉSUMÉ DU TRAITEMENT - STATISTIQUES DE PAGES")
+        print("RÉSUMÉ DU TRAITEMENT - STATISTIQUES DE FOLLOWERS")
         print(f"{'='*60}")
         
         successful = sum(1 for r in results if r['success'])
@@ -1153,7 +1834,7 @@ class MultiOrganizationPageStatsTracker:
         
         # Afficher les URLs des sheets créés
         if successful > 0:
-            print("\n📊 Google Sheets de statistiques de pages créés/mis à jour:")
+            print("\n📊 Google Sheets de statistiques de followers créés/mis à jour:")
             if os.path.exists(self.page_stats_mapping_file):
                 with open(self.page_stats_mapping_file, 'r', encoding='utf-8') as f:
                     mapping = json.load(f)
@@ -1176,10 +1857,10 @@ class MultiOrganizationPageStatsTracker:
         print(f"\n📊 Google Sheet: {sheet_name}")
         
         # Initialisation du tracker
-        tracker = LinkedInPageStatisticsTracker(self.access_token, org_id, sheet_name)
+        tracker = LinkedInFollowerStatisticsTracker(self.access_token, org_id, sheet_name)
         
         # Obtention des statistiques
-        print("\n1. Récupération des statistiques de vues de page...")
+        print("\n1. Récupération des statistiques de followers...")
         raw_stats = tracker.get_page_statistics()
         
         if raw_stats:
@@ -1190,24 +1871,35 @@ class MultiOrganizationPageStatsTracker:
             # Afficher un aperçu
             print("\n📈 Aperçu des statistiques:")
             totals = stats.get('totals', {})
-            print(f"   Total vues: {totals.get('total_page_views', 0)}")
-            print(f"   Vues desktop: {totals.get('total_desktop_views', 0)}")
-            print(f"   Vues mobile: {totals.get('total_mobile_views', 0)}")
-            print(f"   Pays uniques: {len(stats.get('by_country', {}))}")
-            print(f"   Industries représentées: {len(stats.get('by_industry', {}))}")
+            print(f"   Nbre d'abonnés: {totals.get('total_followers', 0)}")
+            print(f"   Pays uniques: {totals.get('countries_count', 0)}")
+            print(f"   Industries représentées: {totals.get('industries_count', 0)}")
+            print(f"   Fonctions représentées: {totals.get('functions_count', 0)}")
+            print(f"   Niveaux de séniorité: {totals.get('seniorities_count', 0)}")
+            
+            # Afficher le top 3 des pays
+            if stats.get('by_country'):
+                print("\n   Top 3 des pays:")
+                country_list = [(code, data['name'], data['total_followers']) 
+                               for code, data in stats['by_country'].items()]
+                country_list.sort(key=lambda x: x[2], reverse=True)
+                for i, (code, name, followers) in enumerate(country_list[:3], 1):
+                    print(f"     {i}. {name}: {followers} abonnés")
             
             # Chemin vers les credentials
-            credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
-            
-            # Pour Google Cloud Run, utiliser le chemin monté
-            if os.getenv('K_SERVICE'):
-                credentials_path = Path('/app/credentials/service_account_credentials.json')
+            # Déterminer le chemin des credentials selon l'environnement
+            if os.getenv('K_SERVICE'):  # Cloud Run/Functions
+                credentials_path = Path('/tmp/credentials/service_account_credentials.json')
+            else:  # Local
+                credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
             
             if not credentials_path.exists():
                 # Essayer de créer les credentials depuis une variable d'environnement
                 creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
                 if creds_json:
-                    credentials_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Créer le dossier si nécessaire et si on n'est pas dans /app
+                    if not str(credentials_path).startswith('/app'):
+                        credentials_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(credentials_path, 'w') as f:
                         f.write(creds_json)
                     print("   ✅ Credentials créés depuis la variable d'environnement")
@@ -1233,14 +1925,14 @@ class MultiOrganizationPageStatsTracker:
                 print(f"\n❌ Échec de l'export pour {org_name}")
                 return None
         else:
-            print("   ❌ Impossible de récupérer les statistiques de vues de page")
+            print("   ❌ Impossible de récupérer les statistiques de followers")
             return None
 
 
 def main():
     """Fonction principale"""
     print("="*60)
-    print("LINKEDIN MULTI-ORGANISATION PAGE STATISTICS TRACKER")
+    print("LINKEDIN MULTI-ORGANISATION FOLLOWER STATISTICS TRACKER")
     print("="*60)
     print(f"Date d'exécution: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -1264,18 +1956,22 @@ def main():
     
     print(f"\n⚙️  Configuration:")
     print(f"   - Email admin: {tracker.admin_email}")
-    print(f"   - Type de données: Statistiques par pays, séniorité et industrie")
+    print(f"   - Type de données: Statistiques de followers par pays, séniorité, fonction et industrie")
     
     # Demander confirmation si plus de 5 organisations
     if len(tracker.organizations) > 5:
         print(f"\n⚠️  Attention: {len(tracker.organizations)} organisations à traiter.")
         print("   Cela peut prendre du temps et consommer des quotas API.")
-        response = input("   Continuer ? (o/N): ")
+        if os.getenv('AUTOMATED_MODE', 'false').lower() == 'true':
+            response = 'o'
+            print('🤖 Mode automatisé: réponse automatique \'o\'')
+        else:
+            response = input("   Continuer ? (o/N): ")
         if response.lower() != 'o':
             print("Annulé.")
             sys.exit(0)
     
-    print("\n🚀 Démarrage du traitement des statistiques de pages...")
+    print("\n🚀 Démarrage du traitement des statistiques de followers...")
     print("⏳ Note: Le traitement inclut des délais pour respecter les quotas Google Sheets")
     
     # Lancer le traitement

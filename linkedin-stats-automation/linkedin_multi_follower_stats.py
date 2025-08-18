@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-LinkedIn Multi-Organization Follower Statistics Tracker
-Ce script collecte les statistiques des followers LinkedIn par catégorie (industrie, fonction, séniorité, etc.)
+LinkedIn Multi-Organization - Suivi des Statistiques des Abonnés
+Ce script collecte les statistiques des abonnés LinkedIn par catégorie (industrie, fonction, séniorité, etc.)
 pour plusieurs organisations et les enregistre dans Google Sheets avec un formatage optimisé pour Looker Studio.
 """
 
@@ -23,6 +23,37 @@ from gspread.exceptions import APIError
 
 # Chargement des variables d'environnement
 load_dotenv()
+
+def ensure_percentage_as_decimal(value):
+    """
+    Convertit une valeur en décimal pour Google Sheets PERCENT
+    
+    Args:
+        value: La valeur à convertir (peut être 5 pour 5% ou 0.05 pour 5%)
+    
+    Returns:
+        float: Valeur en décimal (0.05 pour 5%)
+    """
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, str):
+        # Enlever le symbole % si présent
+        value = value.replace('%', '').strip()
+        try:
+            value = float(value)
+        except:
+            return 0.0
+    
+    if isinstance(value, (int, float)):
+        # Si la valeur est > 1, on assume que c'est un pourcentage
+        if value > 1:
+            return float(value / 100)
+        else:
+            return float(value)
+    
+    return 0.0
+
 
 def safe_sheets_operation(operation, *args, max_retries=5, **kwargs):
     """
@@ -74,21 +105,21 @@ def safe_sheets_operation(operation, *args, max_retries=5, **kwargs):
             time.sleep(min(30, (2 ** attempt) * 2))
 
 class LinkedInFollowerStatisticsTracker:
-    """Classe pour suivre les statistiques des followers LinkedIn par catégorie"""
+    """Classe pour suivre les statistiques des abonnés LinkedIn par catégorie"""
     
     def __init__(self, access_token, organization_id, sheet_name=None):
         """Initialise le tracker avec le token d'accès et l'ID de l'organisation"""
         self.access_token = access_token
         self.organization_id = organization_id
         self.sheet_name = sheet_name or f"LinkedIn_Follower_Stats_{organization_id}"
-        self.base_url = "https://api.linkedin.com/v2"
+        self.base_url = "https://api.linkedin.com/rest"
         
     def get_headers(self):
         """Retourne les en-têtes pour les requêtes API"""
         return {
             "Authorization": f"Bearer {self.access_token}",
             "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "202312",
+            "LinkedIn-Version": "202505",
             "Content-Type": "application/json"
         }
     
@@ -101,9 +132,6 @@ class LinkedInFollowerStatisticsTracker:
         # Construire l'URL
         url = f"{self.base_url}/organizationalEntityFollowerStatistics?q=organizationalEntity&organizationalEntity={encoded_urn}"
         
-        # Récupérer le nombre total de followers (pour calculer la catégorie "Autre")
-        total_followers = self._get_total_followers()
-        
         # Effectuer la requête avec gestion des erreurs et retry
         max_retries = 3
         retry_delay = 2  # secondes
@@ -115,9 +143,6 @@ class LinkedInFollowerStatisticsTracker:
                 if response.status_code == 200:
                     data = response.json()
                     print(f"   Données statistiques récupérées avec succès")
-                    # Ajouter le nombre total de followers aux données
-                    if 'elements' in data and len(data['elements']) > 0:
-                        data['elements'][0]['totalFollowers'] = total_followers
                     return data
                     
                 elif response.status_code == 429:
@@ -135,42 +160,81 @@ class LinkedInFollowerStatisticsTracker:
                 time.sleep(retry_delay)
                 retry_delay *= 2
         
-        print("   Échec après plusieurs tentatives pour obtenir les statistiques des followers.")
+        print("   Échec après plusieurs tentatives pour obtenir les statistiques des abonnés.")
         return None
         
     def _get_total_followers(self):
-        """Récupère le nombre total de followers via une autre API"""
-        organization_urn = f"urn:li:organization:{self.organization_id}"
-        encoded_urn = urllib.parse.quote(organization_urn)
+        """Récupère le nombre total de followers via plusieurs méthodes"""
         
-        url = f"{self.base_url}/networkSizes/{encoded_urn}?edgeType=CompanyFollowedByMember"
-        
-        max_retries = 3
-        retry_delay = 2
-        
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(url, headers=self.get_headers())
+        # Méthode 1: Via networkSizes (méthode documentée)
+        total_followers = self._get_total_via_network_sizes()
+        if total_followers > 0:
+            return total_followers
+            
+        # Méthode 2: Via organizations (si on a les droits admin)
+        total_followers = self._get_total_via_organizations()
+        if total_followers > 0:
+            return total_followers
+            
+        # Méthode 3: Calculer depuis les statistiques existantes (moins précis)
+        print("   ⚠️  Impossible de récupérer le total réel, utilisation du calcul approximatif")
+        return 0
+    
+    def _get_total_via_network_sizes(self):
+        """Récupère le nombre total via l'API networkSizes (méthode documentée)"""
+        try:
+            # Selon la doc, l'URL doit être exactement comme ça
+            organization_urn = f"urn:li:organization:{self.organization_id}"
+            encoded_urn = urllib.parse.quote(organization_urn, safe='')
+            
+            # URL exacte selon la documentation
+            url = f"{self.base_url}/networkSizes/{encoded_urn}?edgeType=COMPANY_FOLLOWED_BY_MEMBER"
+            
+            response = requests.get(url, headers=self.get_headers())
+            
+            if response.status_code == 200:
+                data = response.json()
+                followers = data.get('firstDegreeSize', 0)
+                if followers > 0:
+                    print(f"   Nombre total d'abonnés: {followers}")
+                    return followers
+            else:
+                # Si ça ne marche pas, essayer l'ancienne notation
+                url_old = f"{self.base_url}/networkSizes/{encoded_urn}?edgeType=CompanyFollowedByMember"
+                response = requests.get(url_old, headers=self.get_headers())
                 
                 if response.status_code == 200:
                     data = response.json()
                     followers = data.get('firstDegreeSize', 0)
-                    print(f"   Nombre total de followers: {followers}")
+                    if followers > 0:
+                        print(f"   Nombre total d'abonnés: {followers}")
+                        return followers
+                
+        except Exception as e:
+            print(f"   Exception avec networkSizes: {e}")
+            
+        return 0
+    
+    def _get_total_via_organizations(self):
+        """Récupère le nombre total via l'API organizations (nécessite droits admin)"""
+        try:
+            # Essayer avec l'ID direct (nécessite droits admin)
+            url = f"{self.base_url}/organizations/{self.organization_id}"
+            
+            response = requests.get(url, headers=self.get_headers())
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Chercher followerCount dans la réponse
+                # Note: Ce champ n'est pas documenté dans la doc fournie, mais peut exister
+                followers = data.get('followerCount', 0)
+                if followers > 0:
+                    print(f"   Nombre total d'abonnés (via organizations): {followers}")
                     return followers
-                elif response.status_code == 429:
-                    print(f"   Rate limit atteint, attente de {retry_delay} secondes...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                else:
-                    print(f"   Erreur lors de la récupération du nombre total de followers: {response.status_code}")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-            except Exception as e:
-                print(f"   Exception lors de la récupération du nombre total de followers: {e}")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-        
-        print("   Impossible de récupérer le nombre total de followers.")
+            
+        except Exception as e:
+            print(f"   Exception avec organizations: {e}")
+            
         return 0
     
     def parse_follower_statistics(self, data):
@@ -183,128 +247,190 @@ class LinkedInFollowerStatisticsTracker:
         # S'assurer que les données sont valides
         if not data or 'elements' not in data or len(data['elements']) == 0:
             print("   Aucune donnée de statistiques valide trouvée.")
+            stats['nombre_abonnes'] = total_followers
+            stats['by_company_size'] = {'Non spécifié': {'numeric_size': 999999, 'organic': 0, 'paid': 0, 'total': 0}}
+            stats['by_function'] = {'0': {'name': 'Non spécifié', 'organic': 0, 'paid': 0, 'total': 0}}
+            stats['by_seniority'] = {'0': {'name': 'Non spécifié', 'organic': 0, 'paid': 0, 'total': 0}}
+            stats['by_industry'] = {'0': {'name': 'Non spécifié', 'organic': 0, 'paid': 0, 'total': 0}}
             return stats
         
         # Obtenir le premier élément (qui contient toutes les stats)
         element = data['elements'][0]
         
-        # Récupérer le nombre total de followers
-        total_followers = element.get('totalFollowers', 0)
-        stats['total_followers'] = total_followers
+        # D'abord, calculer les totaux pour chaque catégorie
+        # Car LinkedIn peut avoir des followers comptés dans plusieurs catégories
+        totals_by_category = {
+            'size': 0,
+            'function': 0,
+            'seniority': 0,
+            'industry': 0
+        }
+        
+        # Calculer le total depuis les tailles d'entreprise
+        if 'followerCountsByStaffCountRange' in element:
+            for item in element['followerCountsByStaffCountRange']:
+                organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
+                paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
+                totals_by_category['size'] += (organic_count + paid_count)
+        
+        # Calculer le total depuis les fonctions
+        if 'followerCountsByFunction' in element:
+            for item in element['followerCountsByFunction']:
+                organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
+                paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
+                totals_by_category['function'] += (organic_count + paid_count)
+        
+        # Calculer le total depuis les séniorités
+        if 'followerCountsBySeniority' in element:
+            for item in element['followerCountsBySeniority']:
+                organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
+                paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
+                totals_by_category['seniority'] += (organic_count + paid_count)
+        
+        # Calculer le total depuis les industries
+        if 'followerCountsByIndustry' in element:
+            for item in element['followerCountsByIndustry']:
+                organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
+                paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
+                totals_by_category['industry'] += (organic_count + paid_count)
+        
+        # Le total calculé est le maximum des totaux par catégorie
+        # Car un follower peut être dans toutes les catégories
+        calculated_total = max(totals_by_category.values()) if totals_by_category.values() else 0
+        
+        # Essayer de récupérer le nombre total réel de followers
+        total_followers = self._get_total_followers()
+        
+        # Si on n'a pas pu récupérer le total réel, utiliser le total calculé
+        if total_followers == 0:
+            total_followers = calculated_total
+            print(f"   ⚠️  Utilisation du total calculé depuis les catégories: {total_followers}")
+        
+        stats['nombre_abonnes'] = total_followers
         
         # Extraire les statistiques par taille d'entreprise
         stats['by_company_size'] = {}
+        categorized_by_size = 0
         if 'followerCountsByStaffCountRange' in element:
-            size_total = 0
             for item in element['followerCountsByStaffCountRange']:
                 size_range = self._format_company_size(item.get('staffCountRange', ''))
                 numeric_size = self._get_numeric_size(size_range)
                 organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
                 paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
-                size_total += organic_count + paid_count
+                total_count = organic_count + paid_count
+                categorized_by_size += total_count
                 stats['by_company_size'][size_range] = {
                     'numeric_size': numeric_size,
                     'organic': organic_count,
                     'paid': paid_count,
-                    'total': organic_count + paid_count
+                    'total': total_count
                 }
-            
-            # Ajouter une catégorie "Autre" pour les followers non catégorisés
-            other_followers = total_followers - size_total
-            if other_followers > 0:
-                stats['by_company_size']['Autre'] = {
-                    'numeric_size': 999999,  # Valeur très élevée pour qu'elle apparaisse en dernier
-                    'organic': other_followers,
-                    'paid': 0,
-                    'total': other_followers
-                }
+        
+        # Pour les "Non spécifiés", utiliser la différence avec le total de cette catégorie
+        # plutôt qu'avec le total général
+        uncategorized_by_size = max(0, total_followers - totals_by_category['size'])
+        if uncategorized_by_size > 0 or len(stats['by_company_size']) == 0:
+            stats['by_company_size']['Non spécifié'] = {
+                'numeric_size': 999999,
+                'organic': uncategorized_by_size,
+                'paid': 0,
+                'total': uncategorized_by_size
+            }
         
         # Extraire les statistiques par fonction
         stats['by_function'] = {}
         function_descriptions = self._get_function_descriptions()
+        categorized_by_function = 0
         if 'followerCountsByFunction' in element:
-            function_total = 0
             for item in element['followerCountsByFunction']:
                 function = item.get('function', '')
                 function_id = function.split(':')[-1] if ':' in function else function
                 function_name = function_descriptions.get(function_id, f"Fonction {function_id}")
                 organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
                 paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
-                function_total += organic_count + paid_count
+                total_count = organic_count + paid_count
+                categorized_by_function += total_count
                 stats['by_function'][function_id] = {
                     'name': function_name,
                     'organic': organic_count,
                     'paid': paid_count,
-                    'total': organic_count + paid_count
+                    'total': total_count
                 }
-            
-            # Ajouter une catégorie "Autre" pour les followers non catégorisés
-            other_followers = total_followers - function_total
-            if other_followers > 0:
-                stats['by_function']['0'] = {
-                    'name': 'Autre',
-                    'organic': other_followers,
-                    'paid': 0,
-                    'total': other_followers
-                }
+        
+        uncategorized_by_function = max(0, total_followers - totals_by_category['function'])
+        if uncategorized_by_function > 0 or len(stats['by_function']) == 0:
+            stats['by_function']['0'] = {
+                'name': 'Non spécifié',
+                'organic': uncategorized_by_function,
+                'paid': 0,
+                'total': uncategorized_by_function
+            }
                 
         # Extraire les statistiques par ancienneté
         stats['by_seniority'] = {}
         seniority_descriptions = self._get_seniority_descriptions()
+        categorized_by_seniority = 0
         if 'followerCountsBySeniority' in element:
-            seniority_total = 0
             for item in element['followerCountsBySeniority']:
                 seniority = item.get('seniority', '')
                 seniority_id = seniority.split(':')[-1] if ':' in seniority else seniority
                 seniority_name = seniority_descriptions.get(seniority_id, f"Niveau {seniority_id}")
                 organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
                 paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
-                seniority_total += organic_count + paid_count
+                total_count = organic_count + paid_count
+                categorized_by_seniority += total_count
                 stats['by_seniority'][seniority_id] = {
                     'name': seniority_name,
                     'organic': organic_count,
                     'paid': paid_count,
-                    'total': organic_count + paid_count
+                    'total': total_count
                 }
-            
-            # Ajouter une catégorie "Autre" pour les followers non catégorisés
-            other_followers = total_followers - seniority_total
-            if other_followers > 0:
-                stats['by_seniority']['0'] = {
-                    'name': 'Autre',
-                    'organic': other_followers,
-                    'paid': 0,
-                    'total': other_followers
-                }
+        
+        uncategorized_by_seniority = max(0, total_followers - totals_by_category['seniority'])
+        if uncategorized_by_seniority > 0 or len(stats['by_seniority']) == 0:
+            stats['by_seniority']['0'] = {
+                'name': 'Non spécifié',
+                'organic': uncategorized_by_seniority,
+                'paid': 0,
+                'total': uncategorized_by_seniority
+            }
                 
         # Extraire les statistiques par industrie
         stats['by_industry'] = {}
         industry_descriptions = self._get_industry_descriptions()
+        categorized_by_industry = 0
         if 'followerCountsByIndustry' in element:
-            industry_total = 0
             for item in element['followerCountsByIndustry']:
                 industry = item.get('industry', '')
                 industry_id = industry.split(':')[-1] if ':' in industry else industry
                 industry_name = industry_descriptions.get(industry_id, f"Industrie {industry_id}")
                 organic_count = item.get('followerCounts', {}).get('organicFollowerCount', 0)
                 paid_count = item.get('followerCounts', {}).get('paidFollowerCount', 0)
-                industry_total += organic_count + paid_count
+                total_count = organic_count + paid_count
+                categorized_by_industry += total_count
                 stats['by_industry'][industry_id] = {
                     'name': industry_name,
                     'organic': organic_count,
                     'paid': paid_count,
-                    'total': organic_count + paid_count
+                    'total': total_count
                 }
-            
-            # Ajouter une catégorie "Autre" pour les followers non catégorisés
-            other_followers = total_followers - industry_total
-            if other_followers > 0:
-                stats['by_industry']['0'] = {
-                    'name': 'Autre',
-                    'organic': other_followers,
-                    'paid': 0,
-                    'total': other_followers
-                }
+        
+        uncategorized_by_industry = max(0, total_followers - totals_by_category['industry'])
+        if uncategorized_by_industry > 0 or len(stats['by_industry']) == 0:
+            stats['by_industry']['0'] = {
+                'name': 'Non spécifié',
+                'organic': uncategorized_by_industry,
+                'paid': 0,
+                'total': uncategorized_by_industry
+            }
+        
+        # Afficher un résumé des catégories
+        print(f"\n   📊 Résumé des abonnés:")
+        print(f"      Total réel/calculé: {total_followers}")
+        print(f"      Total par taille d'entreprise: {totals_by_category['size']}")
+        print(f"      Total par fonction: {totals_by_category['function']}")
+        print(f"      Total par séniorité: {totals_by_category['seniority']}")
+        print(f"      Total par industrie: {totals_by_category['industry']}")
         
         return stats
     
@@ -319,7 +445,8 @@ class LinkedInFollowerStatisticsTracker:
             '501-1000 employés': 1000,
             '1001-5000 employés': 5000,
             '5001-10000 employés': 10000,
-            '10001+ employés': 10001
+            '10001+ employés': 10001,
+            'Non spécifié': 999999
         }
         return size_mapping.get(size_range, 0)
     
@@ -355,18 +482,18 @@ class LinkedInFollowerStatisticsTracker:
         }
     
     def _get_seniority_descriptions(self):
-        """Fournit une description pour les niveaux de séniorité"""
+        """Fournit une description pour les niveaux de séniorité avec numérotation hiérarchique"""
         return {
-            "1": "Stagiaire",
-            "2": "Débutant",
-            "3": "Junior",
-            "4": "Intermédiaire",
-            "5": "Senior",
-            "6": "Chef d'équipe",
-            "7": "Directeur",
-            "8": "Vice-président",
-            "9": "C-suite",
-            "10": "Cadre dirigeant"
+            "1": "01. Stagiaire",
+            "2": "02. Débutant",
+            "3": "03. Junior",
+            "4": "04. Intermédiaire",
+            "5": "05. Senior",
+            "6": "06. Chef d'équipe",
+            "7": "07. Directeur",
+            "8": "08. Vice-président",
+            "9": "09. Direction générale",  # au lieu de "C-suite"
+            "10": "10. Cadre dirigeant"
         }
     
     def _get_industry_descriptions(self):
@@ -643,33 +770,35 @@ class GoogleSheetsExporter:
             safe_sheets_operation(sheet.clear)
             time.sleep(2)
             
-            # Calculer le total pour les pourcentages
-            total_followers = stats.get('total_followers', 0)
-            if total_followers == 0:
-                total_followers = sum([stats['by_company_size'][size]['organic'] for size in stats['by_company_size']])
+            # Utiliser le total réel récupéré de l'API
+            total_followers = stats.get('nombre_abonnes', 0)
             
             # Préparer les données pour la taille d'entreprise
             company_size_data = []
-            # Ajouter l'en-tête
-            company_size_data.append(['Entreprise jusqu\'à X employés', 'Nombre de Followers', 'Pourcentage'])
+            # Ajouter l'en-tête avec Date
+            company_size_data.append(['Date', 'Entreprise jusqu\'à X employés', 'Nbre d\'abonnés', 'Pourcentage'])
+            
+            # Date actuelle
+            date_str = stats.get('date', datetime.now().strftime('%Y-%m-%d'))
             
             # Convertir et trier par taille numérique
             size_data = []
             for size, stats_data in stats['by_company_size'].items():
                 numeric_size = stats_data.get('numeric_size', 0)
-                followers = stats_data['organic']
-                percentage = (followers / total_followers) if total_followers > 0 else 0  # Valeur décimale pour Looker
+                followers = stats_data['total']  # Utiliser total au lieu de organic seulement
+                # S'assurer que le pourcentage est en décimal
+                percentage = float(followers / total_followers) if total_followers > 0 else 0.0
                 size_data.append((numeric_size, size, followers, percentage))
             
             # Trier par taille d'entreprise (ordre croissant)
             size_data.sort(key=lambda x: x[0])
             
-            # Ajouter à la liste de données
+            # Ajouter à la liste de données avec la date
             for _, size_name, followers, percentage in size_data:
-                company_size_data.append([size_name, followers, percentage])  # Pourcentage en décimal
+                company_size_data.append([date_str, size_name, followers, percentage])  # Pourcentage en décimal
             
-            # Ajouter le total
-            company_size_data.append(['Total', total_followers, 1.0])  # 100% en décimal
+            # Ajouter le total avec la date
+            company_size_data.append([date_str, 'Total', total_followers, 1.0])  # 100% en décimal
             
             # Mettre à jour la feuille avec les données
             safe_sheets_operation(sheet.update, company_size_data, 'A1')
@@ -677,26 +806,32 @@ class GoogleSheetsExporter:
             
             # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, "A1:C1", {
+            safe_sheets_operation(sheet.format, "A1:D1", {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
             time.sleep(1)
             
-            # Formater la colonne des nombres (B) comme NUMBER
-            safe_sheets_operation(sheet.format, "B2:B" + str(len(company_size_data)), {
+            # Formater la colonne Date (A) comme DATE
+            safe_sheets_operation(sheet.format, "A2:A" + str(len(company_size_data)), {
+                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
+            })
+            time.sleep(1)
+            
+            # Formater la colonne des nombres (C) comme NUMBER
+            safe_sheets_operation(sheet.format, "C2:C" + str(len(company_size_data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
             })
             time.sleep(1)
             
-            # Formater la colonne des pourcentages (C) comme PERCENT
-            safe_sheets_operation(sheet.format, "C2:C" + str(len(company_size_data)), {
+            # Formater la colonne des pourcentages (D) comme PERCENT
+            safe_sheets_operation(sheet.format, "D2:D" + str(len(company_size_data)), {
                 "numberFormat": {"type": "PERCENT", "pattern": "0.0%"}
             })
             time.sleep(1)
             
             # Formater la ligne de total
-            safe_sheets_operation(sheet.format, f"A{len(company_size_data)}:C{len(company_size_data)}", {
+            safe_sheets_operation(sheet.format, f"A{len(company_size_data)}:D{len(company_size_data)}", {
                 "textFormat": {"bold": True}
             })
             
@@ -737,44 +872,32 @@ class GoogleSheetsExporter:
             try:
                 sheet = self.spreadsheet.worksheet("Par Taille")
             except gspread.exceptions.WorksheetNotFound:
-                try:
-                    sheet = self.spreadsheet.worksheet("Feuille2")
-                    safe_sheets_operation(sheet.update_title, "Par Taille")
-                    print("   Feuille par défaut 'Feuille2' renommée en 'Par Taille'")
-                except gspread.exceptions.WorksheetNotFound:
-                    try:
-                        sheet = self.spreadsheet.worksheet("Sheet2")
-                        safe_sheets_operation(sheet.update_title, "Par Taille")
-                        print("   Feuille par défaut 'Sheet2' renommée en 'Par Taille'")
-                    except gspread.exceptions.WorksheetNotFound:
-                        sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Taille", rows=100, cols=6)
-                        print("   Nouvelle feuille 'Par Taille' créée")
+                sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Taille", rows=100, cols=5)
+                print("   Nouvelle feuille 'Par Taille' créée")
             
             # Nettoyer la feuille
             safe_sheets_operation(sheet.clear)
             time.sleep(2)
             
-            # Préparer les données
+            # Préparer les données SANS la colonne Date
             data = []
-            data.append(['Date', 'Taille_Max_Employés', 'Description', 'Followers_Organiques', 'Followers_Payants', 'Total_Followers'])
+            data.append(["Taille_Max_Employés", "Description", "Abonnés_Organiques", "Abonnés_Payants", "Nbre d'abonnés"])
             
-            # Utiliser la date comme chaîne de caractères
-            date_str = stats['date']
             size_entries = []
             
             for size, values in stats['by_company_size'].items():
                 organic = values['organic']
                 paid = values['paid']
-                total = organic + paid
+                total = values['total']
                 numeric_size = values.get('numeric_size', 0)
                 size_entries.append((numeric_size, size, organic, paid, total))
             
             # Trier par taille (ordre croissant)
             size_entries.sort(key=lambda x: x[0])
             
-            # Ajouter à la liste de données
+            # Ajouter à la liste de données SANS date
             for numeric_size, size_name, organic, paid, total in size_entries:
-                data.append([date_str, numeric_size, size_name, organic, paid, total])
+                data.append([numeric_size, size_name, organic, paid, total])
             
             # Mettre à jour la feuille avec les données
             if data:
@@ -783,26 +906,20 @@ class GoogleSheetsExporter:
             
             # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:F1', {
+            safe_sheets_operation(sheet.format, 'A1:E1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
             time.sleep(1)
             
-            # Formater la colonne Date (A) comme DATE
+            # Formater la colonne Taille_Max_Employés (A) comme NUMBER
             safe_sheets_operation(sheet.format, 'A2:A' + str(len(data)), {
-                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
-            })
-            time.sleep(1)
-            
-            # Formater la colonne Taille_Max_Employés (B) comme NUMBER
-            safe_sheets_operation(sheet.format, 'B2:B' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
             })
             time.sleep(1)
             
-            # Formater les colonnes de followers (D, E, F) comme NUMBER
-            safe_sheets_operation(sheet.format, 'D2:F' + str(len(data)), {
+            # Formater les colonnes de followers (C, D, E) comme NUMBER
+            safe_sheets_operation(sheet.format, 'C2:E' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
             })
             
@@ -818,51 +935,39 @@ class GoogleSheetsExporter:
             try:
                 sheet = self.spreadsheet.worksheet("Par Séniorité")
             except gspread.exceptions.WorksheetNotFound:
-                try:
-                    sheet = self.spreadsheet.worksheet("Feuille3")
-                    safe_sheets_operation(sheet.update_title, "Par Séniorité")
-                    print("   Feuille par défaut 'Feuille3' renommée en 'Par Séniorité'")
-                except gspread.exceptions.WorksheetNotFound:
-                    try:
-                        sheet = self.spreadsheet.worksheet("Sheet3")
-                        safe_sheets_operation(sheet.update_title, "Par Séniorité")
-                        print("   Feuille par défaut 'Sheet3' renommée en 'Par Séniorité'")
-                    except gspread.exceptions.WorksheetNotFound:
-                        sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Séniorité", rows=100, cols=6)
-                        print("   Nouvelle feuille 'Par Séniorité' créée")
+                sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Séniorité", rows=100, cols=5)
+                print("   Nouvelle feuille 'Par Séniorité' créée")
             
             # Nettoyer la feuille
             safe_sheets_operation(sheet.clear)
             time.sleep(2)
             
-            # Préparer les données
+            # Préparer les données SANS la colonne Date
             data = []
-            data.append(['Date', 'Niveau_Séniorité', 'Description', 'Followers_Organiques', 'Followers_Payants', 'Total_Followers'])
+            data.append(['Niveau_Séniorité', 'Description', 'Abonnés_Organiques', 'Abonnés_Payants', 'Total_Abonnés'])
             
-            # Utiliser la date comme chaîne de caractères
-            date_str = stats['date']
             seniority_entries = []
             
             for seniority_id, values in stats['by_seniority'].items():
                 seniority_name = values.get('name', f"Niveau {seniority_id}")
                 organic = values['organic']
                 paid = values['paid']
-                total = organic + paid
+                total = values['total']
                 
                 # Essayer de convertir en nombre pour le tri
                 try:
                     numeric_seniority = int(seniority_id)
                 except ValueError:
-                    numeric_seniority = 999  # Pour "autre"
+                    numeric_seniority = 999  # Pour "Non spécifié"
                 
                 seniority_entries.append((numeric_seniority, seniority_name, organic, paid, total))
             
             # Trier par niveau (ordre croissant)
             seniority_entries.sort(key=lambda x: x[0])
             
-            # Ajouter à la liste de données
+            # Ajouter à la liste de données SANS date
             for level, description, organic, paid, total in seniority_entries:
-                data.append([date_str, level, description, organic, paid, total])
+                data.append([level, description, organic, paid, total])
             
             # Mettre à jour la feuille avec les données
             if data:
@@ -871,26 +976,20 @@ class GoogleSheetsExporter:
             
             # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:F1', {
+            safe_sheets_operation(sheet.format, 'A1:E1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
             time.sleep(1)
             
-            # Formater la colonne Date (A) comme DATE
+            # Formater la colonne Niveau_Séniorité (A) comme NUMBER
             safe_sheets_operation(sheet.format, 'A2:A' + str(len(data)), {
-                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
-            })
-            time.sleep(1)
-            
-            # Formater la colonne Niveau_Séniorité (B) comme NUMBER
-            safe_sheets_operation(sheet.format, 'B2:B' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "0"}
             })
             time.sleep(1)
             
-            # Formater les colonnes de followers (D, E, F) comme NUMBER
-            safe_sheets_operation(sheet.format, 'D2:F' + str(len(data)), {
+            # Formater les colonnes de followers (C, D, E) comme NUMBER
+            safe_sheets_operation(sheet.format, 'C2:E' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
             })
             
@@ -906,29 +1005,16 @@ class GoogleSheetsExporter:
             try:
                 sheet = self.spreadsheet.worksheet("Par Fonction")
             except gspread.exceptions.WorksheetNotFound:
-                try:
-                    sheet = self.spreadsheet.worksheet("Feuille4")
-                    safe_sheets_operation(sheet.update_title, "Par Fonction")
-                    print("   Feuille par défaut 'Feuille4' renommée en 'Par Fonction'")
-                except gspread.exceptions.WorksheetNotFound:
-                    try:
-                        sheet = self.spreadsheet.worksheet("Sheet4")
-                        safe_sheets_operation(sheet.update_title, "Par Fonction")
-                        print("   Feuille par défaut 'Sheet4' renommée en 'Par Fonction'")
-                    except gspread.exceptions.WorksheetNotFound:
-                        sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Fonction", rows=100, cols=6)
-                        print("   Nouvelle feuille 'Par Fonction' créée")
+                sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Fonction", rows=100, cols=5)
+                print("   Nouvelle feuille 'Par Fonction' créée")
             
             # Nettoyer la feuille
             safe_sheets_operation(sheet.clear)
             time.sleep(2)
             
-            # Préparer les données
+            # Préparer les données SANS la colonne Date
             data = []
-            data.append(['Date', 'Fonction_ID', 'Nom_Fonction', 'Followers_Organiques', 'Followers_Payants', 'Total_Followers'])
-            
-            # Utiliser la date comme chaîne de caractères
-            date_str = stats['date']
+            data.append(['Fonction_ID', 'Nom_Fonction', 'Abonnés_Organiques', 'Abonnés_Payants', 'Total_Abonnés'])
             
             # Trier par nombre de followers (ordre décroissant)
             function_entries = []
@@ -936,22 +1022,22 @@ class GoogleSheetsExporter:
                 function_name = values.get('name', f"Fonction {function_id}")
                 organic = values['organic']
                 paid = values['paid']
-                total = organic + paid
+                total = values['total']
                 
                 # Convertir l'ID en nombre pour Looker
                 try:
                     numeric_id = int(function_id)
                 except ValueError:
-                    numeric_id = 0  # Pour "autre"
+                    numeric_id = 0  # Pour "Non spécifié"
                 
                 function_entries.append((numeric_id, function_name, organic, paid, total))
                 
             # Trier par nombre de followers décroissant
             function_entries.sort(key=lambda x: x[4], reverse=True)
             
-            # Ajouter à la liste de données
+            # Ajouter à la liste de données SANS date
             for function_id, function_name, organic, paid, total in function_entries:
-                data.append([date_str, function_id, function_name, organic, paid, total])
+                data.append([function_id, function_name, organic, paid, total])
             
             # Mettre à jour la feuille avec les données
             if data:
@@ -960,26 +1046,20 @@ class GoogleSheetsExporter:
             
             # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:F1', {
+            safe_sheets_operation(sheet.format, 'A1:E1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
             time.sleep(1)
             
-            # Formater la colonne Date (A) comme DATE
+            # Formater la colonne Fonction_ID (A) comme NUMBER
             safe_sheets_operation(sheet.format, 'A2:A' + str(len(data)), {
-                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
-            })
-            time.sleep(1)
-            
-            # Formater la colonne Fonction_ID (B) comme NUMBER
-            safe_sheets_operation(sheet.format, 'B2:B' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "0"}
             })
             time.sleep(1)
             
-            # Formater les colonnes de followers (D, E, F) comme NUMBER
-            safe_sheets_operation(sheet.format, 'D2:F' + str(len(data)), {
+            # Formater les colonnes de followers (C, D, E) comme NUMBER
+            safe_sheets_operation(sheet.format, 'C2:E' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
             })
             
@@ -995,29 +1075,17 @@ class GoogleSheetsExporter:
             try:
                 sheet = self.spreadsheet.worksheet("Par Industrie")
             except gspread.exceptions.WorksheetNotFound:
-                try:
-                    sheet = self.spreadsheet.worksheet("Feuille5")
-                    safe_sheets_operation(sheet.update_title, "Par Industrie")
-                    print("   Feuille par défaut 'Feuille5' renommée en 'Par Industrie'")
-                except gspread.exceptions.WorksheetNotFound:
-                    try:
-                        sheet = self.spreadsheet.worksheet("Sheet5")
-                        safe_sheets_operation(sheet.update_title, "Par Industrie")
-                        print("   Feuille par défaut 'Sheet5' renommée en 'Par Industrie'")
-                    except gspread.exceptions.WorksheetNotFound:
-                        sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Industrie", rows=1000, cols=6)
-                        print("   Nouvelle feuille 'Par Industrie' créée")
+                sheet = safe_sheets_operation(self.spreadsheet.add_worksheet, title="Par Industrie", rows=1000, cols=5)
+                print("   Nouvelle feuille 'Par Industrie' créée")
             
             # Nettoyer la feuille
             safe_sheets_operation(sheet.clear)
             time.sleep(2)
             
-            # Préparer les données
+            # Préparer les données SANS la colonne Date
             data = []
-            data.append(['Date', 'Industrie_ID', 'Nom_Industrie', 'Followers_Organiques', 'Followers_Payants', 'Total_Followers'])
-            
-            # Utiliser la date comme chaîne de caractères
-            date_str = stats['date']
+            data.append(['Industrie_ID', 'Nom_Industrie', 'Abonnés_Organiques', 'Abonnés_Payants', 'Total_Abonnés'])
+
             
             # Trier par nombre de followers (ordre décroissant)
             industry_entries = []
@@ -1025,22 +1093,22 @@ class GoogleSheetsExporter:
                 industry_name = values.get('name', f"Industrie {industry_id}")
                 organic = values['organic']
                 paid = values['paid']
-                total = organic + paid
+                total = values['total']
                 
                 # Convertir l'ID en nombre pour Looker
                 try:
                     numeric_id = int(industry_id)
                 except ValueError:
-                    numeric_id = 0  # Pour "autre"
+                    numeric_id = 0  # Pour "Non spécifié"
                 
                 industry_entries.append((numeric_id, industry_name, organic, paid, total))
                 
             # Trier par nombre de followers décroissant
             industry_entries.sort(key=lambda x: x[4], reverse=True)
             
-            # Ajouter à la liste de données
+            # Ajouter à la liste de données SANS date
             for industry_id, industry_name, organic, paid, total in industry_entries:
-                data.append([date_str, industry_id, industry_name, organic, paid, total])
+                data.append([industry_id, industry_name, organic, paid, total])
             
             # Mettre à jour la feuille avec les données
             if data:
@@ -1049,26 +1117,20 @@ class GoogleSheetsExporter:
             
             # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO
             # Formater les en-têtes
-            safe_sheets_operation(sheet.format, 'A1:F1', {
+            safe_sheets_operation(sheet.format, 'A1:E1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
             time.sleep(1)
             
-            # Formater la colonne Date (A) comme DATE
+            # Formater la colonne Industrie_ID (A) comme NUMBER
             safe_sheets_operation(sheet.format, 'A2:A' + str(len(data)), {
-                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
-            })
-            time.sleep(1)
-            
-            # Formater la colonne Industrie_ID (B) comme NUMBER
-            safe_sheets_operation(sheet.format, 'B2:B' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "0"}
             })
             time.sleep(1)
             
-            # Formater les colonnes de followers (D, E, F) comme NUMBER
-            safe_sheets_operation(sheet.format, 'D2:F' + str(len(data)), {
+            # Formater les colonnes de followers (C, D, E) comme NUMBER
+            safe_sheets_operation(sheet.format, 'C2:E' + str(len(data)), {
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
             })
             
@@ -1076,7 +1138,7 @@ class GoogleSheetsExporter:
             print(f"   Erreur lors de la mise à jour de la feuille des industries: {e}")
     
     def add_follower_statistics(self, stats):
-        """Ajoute les statistiques de followers"""
+        """Ajoute les statistiques des abonnés"""
         if not self.connect():
             print("   Impossible de se connecter à Google Sheets. Vérifiez vos credentials.")
             return False
@@ -1112,10 +1174,10 @@ def verify_token(access_token):
     headers = {
         "Authorization": f"Bearer {access_token}",
         "X-Restli-Protocol-Version": "2.0.0",
-        "LinkedIn-Version": "202312"
+        "LinkedIn-Version": "202505"
     }
     
-    url = "https://api.linkedin.com/v2/me"
+    url = "https://api.linkedin.com/rest/me"
     
     try:
         response = requests.get(url, headers=headers)
@@ -1128,7 +1190,7 @@ def verify_token(access_token):
 
 
 class MultiOrganizationFollowerStatsTracker:
-    """Gestionnaire pour les statistiques de followers de plusieurs organisations LinkedIn"""
+    """Gestionnaire pour les statistiques des abonnés de plusieurs organisations LinkedIn"""
     
     def __init__(self, config_file='organizations_config.json'):
         """Initialise le tracker multi-organisations"""
@@ -1285,7 +1347,7 @@ class MultiOrganizationFollowerStatsTracker:
         
         # Résumé
         print(f"\n{'='*60}")
-        print("RÉSUMÉ DU TRAITEMENT - STATISTIQUES DE FOLLOWERS")
+        print("RÉSUMÉ DU TRAITEMENT - STATISTIQUES DES ABONNÉS")
         print(f"{'='*60}")
         
         successful = sum(1 for r in results if r['success'])
@@ -1304,7 +1366,7 @@ class MultiOrganizationFollowerStatsTracker:
         
         # Afficher les URLs des sheets créés
         if successful > 0:
-            print("\n📊 Google Sheets de statistiques de followers créés/mis à jour:")
+            print("\n📊 Google Sheets de statistiques des abonnés créés/mis à jour:")
             if os.path.exists(self.follower_stats_mapping_file):
                 with open(self.follower_stats_mapping_file, 'r', encoding='utf-8') as f:
                     mapping = json.load(f)
@@ -1330,7 +1392,7 @@ class MultiOrganizationFollowerStatsTracker:
         tracker = LinkedInFollowerStatisticsTracker(self.access_token, org_id, sheet_name)
         
         # Obtention des statistiques
-        print("\n1. Récupération des statistiques de followers...")
+        print("\n1. Récupération des statistiques des abonnés...")
         raw_stats = tracker.get_follower_statistics()
         
         if raw_stats:
@@ -1340,24 +1402,34 @@ class MultiOrganizationFollowerStatsTracker:
             
             # Afficher un aperçu
             print("\n📈 Aperçu des statistiques:")
-            print(f"   Total followers: {stats.get('total_followers', 0)}")
-            print(f"   Tailles d'entreprises représentées: {len(stats.get('by_company_size', {}))}")
+            print(f"   Nbre d'abonnés (réel): {stats.get('nombre_abonnes', 0)}")
+            print(f"   Tailles d'entreprises représentées: {len(stats.get('by_company_size', {}))}")            
             print(f"   Fonctions représentées: {len(stats.get('by_function', {}))}")
             print(f"   Niveaux de séniorité: {len(stats.get('by_seniority', {}))}")
             print(f"   Industries représentées: {len(stats.get('by_industry', {}))}")
             
-            # Chemin vers les credentials
-            credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
+            # Afficher les followers non catégorisés
+            print("\n📊 Répartition des abonnés non catégorisés:")
+            for category, data in [('by_company_size', 'Taille'), ('by_function', 'Fonction'), 
+                                 ('by_seniority', 'Séniorité'), ('by_industry', 'Industrie')]:
+                if category in stats:
+                    for key, values in stats[category].items():
+                        if 'Non spécifié' in values.get('name', key):
+                            print(f"   {data}: {values['total']} abonnés non spécifiés")
             
-            # Pour Google Cloud Run, utiliser le chemin monté
-            if os.getenv('K_SERVICE'):
-                credentials_path = Path('/app/credentials/service_account_credentials.json')
+            # Chemin vers les credentials
+            if os.getenv('K_SERVICE'):  # Cloud Run/Functions
+                credentials_path = Path('/tmp/credentials/service_account_credentials.json')
+            else:  # Local
+                credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
             
             if not credentials_path.exists():
                 # Essayer de créer les credentials depuis une variable d'environnement
                 creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
                 if creds_json:
-                    credentials_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Éviter de créer des dossiers dans /app
+                    if not str(credentials_path).startswith('/app'):
+                        credentials_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(credentials_path, 'w') as f:
                         f.write(creds_json)
                     print("   ✅ Credentials créés depuis la variable d'environnement")
@@ -1383,14 +1455,14 @@ class MultiOrganizationFollowerStatsTracker:
                 print(f"\n❌ Échec de l'export pour {org_name}")
                 return None
         else:
-            print("   ❌ Impossible de récupérer les statistiques de followers")
+            print("   ❌ Impossible de récupérer les statistiques des abonnés")
             return None
 
 
 def main():
     """Fonction principale"""
     print("="*60)
-    print("LINKEDIN MULTI-ORGANISATION FOLLOWER STATISTICS TRACKER")
+    print("LINKEDIN MULTI-ORGANISATION - SUIVI DES STATISTIQUES DES ABONNÉS")
     print("="*60)
     print(f"Date d'exécution: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -1414,19 +1486,24 @@ def main():
     
     print(f"\n⚙️  Configuration:")
     print(f"   - Email admin: {tracker.admin_email}")
-    print(f"   - Type de données: Statistiques détaillées des followers")
+    print(f"   - Type de données: Statistiques détaillées des abonnés")
     print(f"   - Formatage: Optimisé pour Looker Studio")
+    print(f"   - Gestion des abonnés non catégorisés: ✅ Activée")
     
     # Demander confirmation si plus de 5 organisations
     if len(tracker.organizations) > 5:
         print(f"\n⚠️  Attention: {len(tracker.organizations)} organisations à traiter.")
         print("   Cela peut prendre du temps et consommer des quotas API.")
-        response = input("   Continuer ? (o/N): ")
+        if os.getenv('AUTOMATED_MODE', 'false').lower() == 'true':
+            response = 'o'
+            print('🤖 Mode automatisé: réponse automatique \'o\'')
+        else:
+            response = input("   Continuer ? (o/N): ")
         if response.lower() != 'o':
             print("Annulé.")
             sys.exit(0)
     
-    print("\n🚀 Démarrage du traitement des statistiques de followers...")
+    print("\n🚀 Démarrage du traitement des statistiques des abonnés...")
     print("⏳ Note: Le traitement inclut des délais pour respecter les quotas Google Sheets")
     
     # Lancer le traitement
@@ -1443,12 +1520,15 @@ def main():
     
     if success:
         print("\n📊 Les Google Sheets sont maintenant optimisés pour Looker Studio avec:")
-        print("   ✅ Formatage des dates (DATE)")
+        print("   ✅ Formatage des dates (DATE) - uniquement dans l'onglet Résumé")
         print("   ✅ Formatage des nombres (NUMBER)")
         print("   ✅ Formatage des pourcentages (PERCENT)")
         print("   ✅ Noms de colonnes sans espaces ni caractères spéciaux")
         print("   ✅ Types de données cohérents pour chaque colonne")
-    
+        print("   ✅ Catégorie 'Non spécifié' pour les followers non catégorisés")
+        print("   ✅ Total d'abonnés réel basé sur l'API networkSizes")
+        
+        
     sys.exit(0 if success else 1)
 
 

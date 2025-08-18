@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LinkedIn Multi-Organization Post Metrics Tracker
+LinkedIn Multi-Organization Post Metrics Tracker - VERSION OPTIMISÉE
 Ce script collecte les métriques détaillées des posts LinkedIn pour plusieurs organisations
 et les enregistre dans Google Sheets.
 """
@@ -19,9 +19,47 @@ from pathlib import Path
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from dotenv import load_dotenv
+import concurrent.futures
+import threading
 
 # Chargement des variables d'environnement
 load_dotenv()
+
+# CACHE GLOBAL POUR ÉVITER LES APPELS RÉPÉTITIFS
+METRICS_CACHE = {}
+CACHE_LOCK = threading.Lock()
+
+# AJOUTEZ LA FONCTION ICI
+def ensure_percentage_as_decimal(value):
+    """
+    Convertit une valeur en décimal pour Google Sheets PERCENT
+    
+    Args:
+        value: La valeur à convertir (peut être 5 pour 5% ou 0.05 pour 5%)
+    
+    Returns:
+        float: Valeur en décimal (0.05 pour 5%)
+    """
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, str):
+        # Enlever le symbole % si présent
+        value = value.replace('%', '').strip()
+        try:
+            value = float(value)
+        except:
+            return 0.0
+    
+    if isinstance(value, (int, float)):
+        # Si la valeur est > 1, on assume que c'est un pourcentage
+        if value > 1:
+            return float(value / 100)
+        else:
+            return float(value)
+    
+    return 0.0
+
 
 def get_column_letter(col_idx):
     """Convertit un indice de colonne (0-based) en lettre de colonne pour Google Sheets (A, B, ..., Z, AA, AB, ...)"""
@@ -38,10 +76,10 @@ def verify_token(access_token):
     headers = {
         "Authorization": f"Bearer {access_token}",
         "X-Restli-Protocol-Version": "2.0.0",
-        "LinkedIn-Version": "202404"  # Utiliser la version la plus récente
+        "LinkedIn-Version": "202505"  # Utiliser la version la plus récente
     }
     
-    url = "https://api.linkedin.com/v2/me"
+    url = "https://api.linkedin.com/rest/me"
     
     try:
         response = requests.get(url, headers=headers)
@@ -66,7 +104,6 @@ class LinkedInPostMetricsTracker:
         self.portability_token = portability_token
         self.organization_id = organization_id
         self.sheet_name = f"LinkedIn_Post_Metrics_{organization_id}"
-        self.base_url_v2 = "https://api.linkedin.com/v2"
         self.base_url_rest = "https://api.linkedin.com/rest"
         self.reaction_types = [
             "LIKE",        # Like
@@ -90,6 +127,7 @@ class LinkedInPostMetricsTracker:
             'CAROUSEL': 'Carrousel d\'images',
             'POLL': 'Sondage',
             'EVENT': 'Événement',
+            'REPOST': 'Repost',
             'UNKNOWN': 'Type inconnu',
             'Unknown': 'Type inconnu'
         }
@@ -98,16 +136,23 @@ class LinkedInPostMetricsTracker:
             'ugcPost': 'Publication native',
             'share': 'Partage de contenu',
             'post': 'Publication',
+            'instantRepost': 'Repost instantané',
             'unknown': 'Type inconnu'
         }
         
-    def get_headers(self, is_rest_api=False, use_portability_token=False):
+        # Configuration pour l'optimisation
+        self.max_posts_to_analyze = int(os.getenv('MAX_POSTS_PER_ORG', '50'))  # Limiter le nombre de posts
+        self.skip_old_posts_days = int(os.getenv('SKIP_OLD_POSTS_DAYS', '365'))  # Ignorer les posts trop anciens
+        self.use_cache = True
+        self.parallel_requests = int(os.getenv('PARALLEL_REQUESTS', '3'))  # Nombre de requêtes en parallèle
+        self.include_instant_reposts = True  # Nouveau paramètre pour inclure les reposts sans commentaire
+    
+    def get_headers(self):
         """Retourne les en-têtes pour les requêtes API"""
-        token = self.portability_token if use_portability_token else self.access_token
         return {
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {self.access_token}",
             "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "202404",
+            "LinkedIn-Version": "202505",
             "Content-Type": "application/json"
         }
     
@@ -121,113 +166,30 @@ class LinkedInPostMetricsTracker:
         """Formate le type de post en français"""
         return self.post_type_translation.get(post_type, f'Autre ({post_type})')
     
-    def get_organization_posts(self, count=100):
-        """Récupère tous les posts de l'organisation avec pagination"""
+    def get_organization_posts(self, count=None):
+        """Récupère tous les posts de l'organisation avec l'API REST versionnée"""
+        if count is None:
+            count = self.max_posts_to_analyze
+            
         # Encoder l'URN de l'organisation
         organization_urn = f"urn:li:organization:{self.organization_id}"
         encoded_urn = urllib.parse.quote(organization_urn)
         
-        # Essayer d'abord avec l'API REST posts
-        try:
-            # Utiliser l'API REST posts
-            base_url = f"{self.base_url_rest}/posts?q=author&author={encoded_urn}&count={count}"
-            
-            all_posts = {'elements': []}
-            next_url = base_url
-            
-            print(f"   Récupération de tous les posts de l'organisation {self.organization_id} (API REST)...")
-            
-            # Boucle pour gérer la pagination
-            while next_url:
-                # Effectuer la requête avec gestion des erreurs et retry
-                max_retries = 3
-                retry_delay = 2  # secondes
-                
-                for attempt in range(max_retries):
-                    try:
-                        response = requests.get(next_url, headers=self.get_headers(is_rest_api=True))
-                        
-                        if response.status_code == 200:
-                            data = response.json()
-                            
-                            # Ajouter les posts à notre liste
-                            all_posts['elements'].extend(data.get('elements', []))
-                            
-                            print(f"   Posts récupérés: {len(all_posts['elements'])} au total")
-                            
-                            # Vérifier s'il y a une page suivante
-                            next_url = None
-                            if 'paging' in data and 'links' in data['paging']:
-                                for link in data['paging']['links']:
-                                    if link.get('rel') == 'next':
-                                        next_url = link.get('href')
-                                        if not next_url.startswith('http'):
-                                            next_url = f"{self.base_url_rest}{next_url}"
-                                        break
-                            
-                            break  # Sortir de la boucle des tentatives
-                            
-                        elif response.status_code == 429:
-                            # Rate limit, attendre avant de réessayer
-                            print(f"   Rate limit atteint, attente de {retry_delay} secondes...")
-                            time.sleep(retry_delay)
-                            retry_delay *= 2  # Backoff exponentiel
-                        elif response.status_code == 404:
-                            # Si on a déjà des posts et qu'on obtient un 404, c'est probablement la fin
-                            if all_posts['elements']:
-                                print(f"   Fin de pagination détectée (404) après {len(all_posts['elements'])} posts")
-                                next_url = None
-                                break
-                            else:
-                                # Si on n'a pas de posts et 404, l'API REST ne fonctionne pas
-                                raise Exception(f"API REST error: {response.status_code}")
-                        else:
-                            print(f"   Erreur API REST: {response.status_code} - {response.text}")
-                            # Si on a déjà des posts, on continue avec ce qu'on a
-                            if all_posts['elements']:
-                                print(f"   Poursuite avec {len(all_posts['elements'])} posts déjà récupérés")
-                                next_url = None
-                                break
-                            else:
-                                raise Exception(f"API REST error: {response.status_code}")
-                            
-                    except Exception as e:
-                        if attempt == max_retries - 1:
-                            # Si on a déjà des posts, on les retourne
-                            if all_posts['elements']:
-                                print(f"   Erreur lors de la pagination, mais {len(all_posts['elements'])} posts déjà récupérés")
-                                next_url = None
-                                break
-                            else:
-                                raise e
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
-                
-                # Pause entre les pages pour respecter les limites de l'API
-                if next_url:
-                    time.sleep(2)
-            
-            # Si on a des posts, les retourner
-            if all_posts['elements']:
-                print(f"   Total des posts récupérés avec l'API REST: {len(all_posts['elements'])}")
-                return all_posts
-                
-        except Exception as e:
-            print(f"   Échec avec l'API REST ({str(e)}), essai avec l'API v2...")
-        
-        # Si l'API REST échoue, essayer avec l'API v2 UGC Posts
-        base_url = f"{self.base_url_v2}/ugcPosts?q=authors&authors=List({encoded_urn})&count={count}"
+        # Utiliser l'API REST /posts
+        base_url = f"{self.base_url_rest}/posts?q=author&author={encoded_urn}&count={count}&sortBy=CREATED"
         
         all_posts = {'elements': []}
         next_url = base_url
         
-        print(f"   Récupération de tous les posts de l'organisation {self.organization_id} (API v2)...")
+        print(f"   Récupération des posts de l'organisation {self.organization_id} (max: {count})...")
         
-        # Boucle pour gérer la pagination
-        while next_url:
-            # Effectuer la requête avec gestion des erreurs et retry
-            max_retries = 3
-            retry_delay = 2  # secondes
+        # Limite de pagination
+        pages_fetched = 0
+        max_pages = 3
+        
+        while next_url and pages_fetched < max_pages:
+            max_retries = 2
+            retry_delay = 1
             
             for attempt in range(max_retries):
                 try:
@@ -235,51 +197,159 @@ class LinkedInPostMetricsTracker:
                     
                     if response.status_code == 200:
                         data = response.json()
-                        
-                        # Ajouter les posts à notre liste
                         all_posts['elements'].extend(data.get('elements', []))
                         
                         print(f"   Posts récupérés: {len(all_posts['elements'])} au total")
                         
-                        # Vérifier s'il y a une page suivante
+                        if len(all_posts['elements']) >= count:
+                            print(f"   Limite de {count} posts atteinte")
+                            next_url = None
+                            break
+                        
+                        # Pagination
                         next_url = None
                         if 'paging' in data and 'links' in data['paging']:
                             for link in data['paging']['links']:
                                 if link.get('rel') == 'next':
                                     next_url = link.get('href')
                                     if not next_url.startswith('http'):
-                                        next_url = f"{self.base_url_v2}{next_url}"
+                                        next_url = f"https://api.linkedin.com/rest{next_url}"
                                     break
                         
-                        break  # Sortir de la boucle des tentatives
+                        pages_fetched += 1
+                        break
                         
                     elif response.status_code == 429:
-                        # Rate limit, attendre avant de réessayer
                         print(f"   Rate limit atteint, attente de {retry_delay} secondes...")
                         time.sleep(retry_delay)
-                        retry_delay *= 2  # Backoff exponentiel
+                        retry_delay *= 2
                     else:
                         print(f"   Erreur API: {response.status_code} - {response.text}")
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
-                        
+                        if all_posts['elements']:
+                            next_url = None
+                            break
+                        else:
+                            return {'elements': []}
+                            
                 except Exception as e:
-                    print(f"   Exception lors de la requête: {e}")
+                    print(f"   Exception: {e}")
+                    if attempt == max_retries - 1:
+                        return {'elements': []}
                     time.sleep(retry_delay)
-                    retry_delay *= 2
             
-            # Si on n'a pas pu récupérer la page, sortir de la boucle
-            if next_url and attempt == max_retries - 1:
-                print("   Échec après plusieurs tentatives pour obtenir la page suivante.")
-                break
-            
-            # Pause entre les pages pour respecter les limites de l'API
             if next_url:
-                time.sleep(2)
+                time.sleep(0.5)
         
+        if len(all_posts['elements']) > count:
+            all_posts['elements'] = all_posts['elements'][:count]
+            
         print(f"   Total des posts récupérés: {len(all_posts['elements'])}")
         return all_posts
-    
+
+    def get_organization_instant_reposts(self):
+        """Récupère les reposts SANS commentaire (instant reposts) de l'organisation"""
+        print("   Recherche des reposts instantanés...")
+        instant_reposts = []
+        
+        # Récupérer le feed de l'organisation pour trouver ses instant reposts
+        organization_urn = f"urn:li:organization:{self.organization_id}"
+        encoded_urn = urllib.parse.quote(organization_urn)
+        
+        # Utiliser l'endpoint de feed pour récupérer tous les contenus de l'organisation
+        url = f"{self.base_url_rest}/dmaFeedContentsExternal?q=author&author={encoded_urn}&count=100"
+        
+        try:
+            response = requests.get(url, headers=self.get_headers(), timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                # Parcourir les éléments pour trouver les instant reposts
+                for content_urn in data.get('elements', []):
+                    if 'instantRepost' in content_urn:
+                        # Extraire l'URN du post original depuis l'URN de l'instant repost
+                        # Format: urn:li:instantRepost:(urn:li:share:XXXXX,YYYYY)
+                        try:
+                            parts = content_urn.split('(')[1].split(')')[0].split(',')
+                            original_post = parts[0] if parts else ''
+                            
+                            instant_reposts.append({
+                                'repost_urn': content_urn,
+                                'original_post': original_post,
+                                'type': 'instantRepost'
+                            })
+                        except:
+                            instant_reposts.append({
+                                'repost_urn': content_urn,
+                                'original_post': '',
+                                'type': 'instantRepost'
+                            })
+            elif response.status_code == 404:
+                # L'endpoint n'existe peut-être pas, essayer une approche alternative
+                print("   Endpoint dmaFeedContentsExternal non disponible, utilisation de l'approche alternative...")
+                
+                # Approche alternative : parcourir les activités de l'organisation
+                activity_url = f"{self.base_url_rest}/organizationPageStatistics/{self.organization_id}/updates?count=100"
+                
+                try:
+                    activity_response = requests.get(activity_url, headers=self.get_headers(), timeout=10)
+                    if activity_response.status_code == 200:
+                        activity_data = activity_response.json()
+                        # Analyser les activités pour trouver les instant reposts
+                        for activity in activity_data.get('elements', []):
+                            if activity.get('updateType') == 'INSTANT_REPOST':
+                                instant_reposts.append({
+                                    'repost_urn': activity.get('urn', ''),
+                                    'original_post': activity.get('originalShare', ''),
+                                    'type': 'instantRepost'
+                                })
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"   Erreur lors de la récupération des reposts instantanés: {e}")
+            # Ne pas faire échouer le processus si cet endpoint n'est pas disponible
+            pass
+        
+        print(f"   {len(instant_reposts)} reposts instantanés trouvés")
+        return instant_reposts
+
+    def get_instant_repost_details(self, instant_repost_urns):
+        """Récupère les détails des instant reposts via batch get"""
+        if not instant_repost_urns:
+            return {}
+        
+        # Construire la liste pour le batch get (limité à 50 à la fois)
+        batch_size = 50
+        all_details = {}
+        
+        for i in range(0, len(instant_repost_urns), batch_size):
+            batch = instant_repost_urns[i:i+batch_size]
+            ids_param = ','.join([urllib.parse.quote(urn) for urn in batch])
+            url = f"{self.base_url_rest}/dmaInstantReposts?ids=List({ids_param})"
+            
+            try:
+                response = requests.get(url, headers=self.get_headers(), timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    all_details.update(data.get('results', {}))
+                elif response.status_code == 404:
+                    # Si l'endpoint n'existe pas, créer des détails basiques
+                    print("   Endpoint dmaInstantReposts non disponible, utilisation de données basiques")
+                    for urn in batch:
+                        all_details[urn] = {
+                            'createdAt': int(datetime.now().timestamp() * 1000),
+                            'author': f"urn:li:organization:{self.organization_id}"
+                        }
+            except Exception as e:
+                # Si erreur, créer des détails basiques pour ne pas bloquer
+                for urn in batch:
+                    all_details[urn] = {
+                        'createdAt': int(datetime.now().timestamp() * 1000),
+                        'author': f"urn:li:organization:{self.organization_id}"
+                    }
+        
+        return all_details
+
+
     def extract_post_content(self, post):
         """Extrait le contenu (texte, image, vidéo) d'un post"""
         content = {
@@ -288,8 +358,30 @@ class LinkedInPostMetricsTracker:
             'text': '',
             'media_type': 'None',
             'media_url': '',
-            'author': post.get('author', '')
+            'author': post.get('author', ''),
+            'is_reshare': False,
+            'original_post': '',
+            'is_instant_repost': False  # Nouveau champ
         }
+        
+        # Vérifier si c'est un instant repost
+        if post.get('_is_instant_repost', False):
+            content['is_instant_repost'] = True
+            content['is_reshare'] = True
+            content['original_post'] = post.get('_original_post', '')
+            content['text'] = ''  # Les instant reposts n'ont pas de texte
+            
+            # Date de création
+            if 'publishedAt' in post:
+                timestamp = post['publishedAt'] / 1000
+                content['creation_date'] = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            
+            return content
+        
+        # Vérifier si c'est un repost
+        if 'resharedShare' in post or 'resharedPost' in post:
+            content['is_reshare'] = True
+            content['original_post'] = post.get('resharedShare', post.get('resharedPost', ''))
         
         # Vérifier si c'est un post de l'API REST ou v2
         if 'publishedAt' in post:  # API REST
@@ -361,20 +453,9 @@ class LinkedInPostMetricsTracker:
                     elif media_category == 'ARTICLE':
                         content['media_type'] = 'ARTICLE'
                     elif media_category == 'RICH':
-                        # Analyser plus finement le contenu riche
-                        if 'status' in media and 'status' in str(media['status']):
-                            if 'VIDEO' in str(media['status']).upper():
-                                content['media_type'] = 'VIDEO'
-                            else:
-                                content['media_type'] = 'RICH_MEDIA'
-                        else:
-                            content['media_type'] = 'RICH_MEDIA'
+                        content['media_type'] = 'RICH_MEDIA'
                     elif media_category == 'CAROUSEL_CONTENT':
                         content['media_type'] = 'CAROUSEL'
-                    elif media_category == 'LIVE_VIDEO':
-                        content['media_type'] = 'VIDEO'
-                    elif media_category == 'DOCUMENT':
-                        content['media_type'] = 'DOCUMENT'
                     elif media_category == 'POLL':
                         content['media_type'] = 'POLL'
                     else:
@@ -391,36 +472,96 @@ class LinkedInPostMetricsTracker:
         
         return content
     
+    def get_post_metrics_batch(self, post_urn):
+        """Récupère toutes les métriques d'un post en une seule fois (OPTIMISÉ)"""
+        global METRICS_CACHE
+        
+        # Vérifier le cache
+        if self.use_cache:
+            with CACHE_LOCK:
+                if post_urn in METRICS_CACHE:
+                    return METRICS_CACHE[post_urn]
+        
+        metrics = {
+            'social_actions': {'likesSummary': {}, 'commentsSummary': {}},
+            'share_stats': {},
+            'reactions': {}
+        }
+        
+        # Déterminer le type de post
+        if "share" in post_urn:
+            post_type = "share"
+        elif "ugcPost" in post_urn:
+            post_type = "ugcPost"
+        elif "post" in post_urn:
+            post_type = "post"
+        elif "instantRepost" in post_urn:
+            post_type = "instantRepost"
+        else:
+            post_type = "unknown"
+        
+        # Pour les instant reposts, les métriques sont généralement limitées
+        if post_type == "instantRepost":
+            # Les instant reposts n'ont généralement pas de métriques propres
+            metrics = {
+                'social_actions': {'likesSummary': {}, 'commentsSummary': {}},
+                'share_stats': {},
+                'reactions': {}
+            }
+        else:
+            # Essayer de récupérer toutes les métriques d'un coup
+            try:
+                # 1. Actions sociales
+                metrics['social_actions'] = self.get_post_social_actions(post_urn)
+                
+                # 2. Statistiques de partage (selon le type)
+                if post_type == "share":
+                    metrics['share_stats'] = self.get_share_statistics(post_urn)
+                elif post_type == "post":
+                    metrics['share_stats'] = self.get_post_statistics_rest(post_urn)
+                else:
+                    metrics['share_stats'] = self.get_ugcpost_statistics(post_urn)
+                
+                # 3. Réactions détaillées
+                metrics['reactions'] = self.get_post_reactions(post_urn)
+                
+            except Exception as e:
+                print(f"   Erreur lors de la récupération des métriques pour {post_urn}: {e}")
+        
+        # Mettre en cache
+        if self.use_cache:
+            with CACHE_LOCK:
+                METRICS_CACHE[post_urn] = metrics
+        
+        return metrics
+    
     def get_post_social_actions(self, post_urn):
         """Obtient les actions sociales (commentaires, likes) pour un post"""
         encoded_urn = urllib.parse.quote(post_urn)
-        url = f"{self.base_url_v2}/socialActions/{encoded_urn}"
+        url = f"{self.base_url_rest}/socialActions/{encoded_urn}"
         
-        max_retries = 3
-        retry_delay = 2
+        max_retries = 2  # Réduit
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=self.get_headers())
+                response = requests.get(url, headers=self.get_headers(), timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
                     return data
-                    
+                elif response.status_code in [404, 403]:
+                    return {}
                 elif response.status_code == 429:
                     time.sleep(retry_delay)
                     retry_delay *= 2
-                elif response.status_code == 404:
-                    return {}
-                elif response.status_code == 403:
-                    return {}
                 else:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
+                    return {}
                     
             except Exception as e:
+                if attempt == max_retries - 1:
+                    return {}
                 time.sleep(retry_delay)
-                retry_delay *= 2
         
         return {}
     
@@ -432,34 +573,30 @@ class LinkedInPostMetricsTracker:
         
         url = f"{self.base_url_rest}/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity={encoded_org_urn}&shares=List({encoded_share_urn})"
         
-        max_retries = 3
-        retry_delay = 2
+        max_retries = 2
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=self.get_headers(is_rest_api=True))
+                response = requests.get(url, headers=self.get_headers(), timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    
                     if data and 'elements' in data and len(data['elements']) > 0:
                         return data['elements'][0].get('totalShareStatistics', {})
-                    else:
-                        return {}
-                    
+                    return {}
+                elif response.status_code in [404, 403, 400, 500]:
+                    return {}
                 elif response.status_code == 429:
                     time.sleep(retry_delay)
                     retry_delay *= 2
-                elif response.status_code in [404, 403, 400, 500]:
-                    return {}
                 else:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
+                    return {}
                     
             except Exception as e:
+                if attempt == max_retries - 1:
+                    return {}
                 time.sleep(retry_delay)
-                retry_delay *= 2
         
         return {}
     
@@ -471,34 +608,30 @@ class LinkedInPostMetricsTracker:
         
         url = f"{self.base_url_rest}/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity={encoded_org_urn}&ugcPosts=List({encoded_ugcpost_urn})"
         
-        max_retries = 3
-        retry_delay = 2
+        max_retries = 2
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=self.get_headers(is_rest_api=True))
+                response = requests.get(url, headers=self.get_headers(), timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    
                     if data and 'elements' in data and len(data['elements']) > 0:
                         return data['elements'][0].get('totalShareStatistics', {})
-                    else:
-                        return {}
-                    
+                    return {}
+                elif response.status_code in [404, 403, 400, 500]:
+                    return {}
                 elif response.status_code == 429:
                     time.sleep(retry_delay)
                     retry_delay *= 2
-                elif response.status_code in [404, 403, 400, 500]:
-                    return {}
                 else:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
+                    return {}
                     
             except Exception as e:
+                if attempt == max_retries - 1:
+                    return {}
                 time.sleep(retry_delay)
-                retry_delay *= 2
         
         return {}
     
@@ -507,29 +640,28 @@ class LinkedInPostMetricsTracker:
         encoded_urn = urllib.parse.quote(post_urn)
         url = f"{self.base_url_rest}/socialMetadata/{encoded_urn}"
         
-        max_retries = 3
-        retry_delay = 2
+        max_retries = 2
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=self.get_headers(is_rest_api=True))
+                response = requests.get(url, headers=self.get_headers(), timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
                     return data.get('reactionSummaries', {})
-                    
+                elif response.status_code in [404, 403]:
+                    return {}
                 elif response.status_code == 429:
                     time.sleep(retry_delay)
                     retry_delay *= 2
-                elif response.status_code in [404, 403]:
-                    return {}
                 else:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
+                    return {}
                     
             except Exception as e:
+                if attempt == max_retries - 1:
+                    return {}
                 time.sleep(retry_delay)
-                retry_delay *= 2
         
         return {}
     
@@ -539,170 +671,229 @@ class LinkedInPostMetricsTracker:
         encoded_org_urn = urllib.parse.quote(organization_urn)
         encoded_post_urn = urllib.parse.quote(post_urn)
         
-        # Pour l'API REST, utiliser l'endpoint postStatistics
         url = f"{self.base_url_rest}/organizationalEntityShareStatistics?q=organizationalEntity&organizationalEntity={encoded_org_urn}&posts=List({encoded_post_urn})"
         
-        max_retries = 3
-        retry_delay = 2
+        max_retries = 2
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, headers=self.get_headers(is_rest_api=True))
+                response = requests.get(url, headers=self.get_headers(), timeout=10)
                 
                 if response.status_code == 200:
                     data = response.json()
-                    
                     if data and 'elements' in data and len(data['elements']) > 0:
                         return data['elements'][0].get('totalShareStatistics', {})
-                    else:
-                        return {}
-                    
+                    return {}
+                elif response.status_code in [404, 403, 400, 500]:
+                    return {}
                 elif response.status_code == 429:
                     time.sleep(retry_delay)
                     retry_delay *= 2
-                elif response.status_code in [404, 403, 400, 500]:
-                    return {}
                 else:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
+                    return {}
                     
             except Exception as e:
+                if attempt == max_retries - 1:
+                    return {}
                 time.sleep(retry_delay)
-                retry_delay *= 2
         
         return {}
     
+    def process_post_batch(self, posts_batch):
+        """Traite un lot de posts en parallèle"""
+        post_metrics = []
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.parallel_requests) as executor:
+            # Créer les futures pour chaque post
+            future_to_post = {}
+            
+            for post in posts_batch:
+                post_urn = post['id']
+                
+                # Extraire le contenu du post
+                content = self.extract_post_content(post)
+                
+                # Soumettre la tâche de récupération des métriques
+                future = executor.submit(self.get_post_metrics_batch, post_urn)
+                future_to_post[future] = (post, content)
+            
+            # Récupérer les résultats
+            for future in concurrent.futures.as_completed(future_to_post):
+                post, content = future_to_post[future]
+                post_urn = post['id']
+                
+                try:
+                    metrics = future.result(timeout=30)
+                    
+                    # Extraire les données
+                    social_actions = metrics.get('social_actions', {})
+                    share_stats = metrics.get('share_stats', {})
+                    reactions = metrics.get('reactions', {})
+                    
+                    # Déterminer le type de post
+                    if "share" in post_urn:
+                        post_type = "share"
+                    elif "ugcPost" in post_urn:
+                        post_type = "ugcPost"
+                    elif "post" in post_urn:
+                        post_type = "post"
+                    elif "instantRepost" in post_urn:
+                        post_type = "instantRepost"
+                    else:
+                        post_type = "unknown"
+                    
+                    # Déterminer le sous-type
+                    if content.get('is_instant_repost'):
+                        sous_type = "Repost instantané"
+                    elif content.get('is_reshare'):
+                        if content.get('text'):
+                            sous_type = "Repost avec commentaire"
+                        else:
+                            sous_type = "Repost avec commentaire vide"
+                    else:
+                        sous_type = "Contenu original"
+                    
+                    # Extraire les métriques
+                    likes_summary = social_actions.get('likesSummary', {})
+                    comments_summary = social_actions.get('commentsSummary', {})
+                    
+                    # Extraire les compteurs pour chaque type de réaction
+                    like_count = reactions.get('LIKE', {}).get('count', 0)
+                    praise_count = reactions.get('PRAISE', {}).get('count', 0)
+                    empathy_count = reactions.get('EMPATHY', {}).get('count', 0)
+                    interest_count = reactions.get('INTEREST', {}).get('count', 0)
+                    appreciation_count = reactions.get('APPRECIATION', {}).get('count', 0)
+                    entertainment_count = reactions.get('ENTERTAINMENT', {}).get('count', 0)
+                    
+                    # Calculer le total des réactions
+                    total_reactions = (like_count + praise_count + empathy_count + 
+                                      interest_count + appreciation_count + entertainment_count)
+                    
+                    # Agrégation des métriques avec formatage en français
+                    post_metric = {
+                        'post_id': post_urn,
+                        'post_type': self.format_post_type(post_type),
+                        'sous_type': sous_type,
+                        'is_reshare': content.get('is_reshare', False),
+                        'original_post': content.get('original_post', ''),
+                        'creation_date': content['creation_date'],
+                        'text': content['text'],
+                        'media_type': self.format_media_type(content['media_type']),
+                        'media_url': content['media_url'],
+                        'author': content['author'],
+                        'total_comments': comments_summary.get('aggregatedTotalComments', 0),
+                        'impressions': share_stats.get('impressionCount', 0),
+                        'unique_impressions': share_stats.get('uniqueImpressionsCount', 0),
+                        'clicks': share_stats.get('clickCount', 0),
+                        'shares': share_stats.get('shareCount', 0),
+                        'engagement_rate': share_stats.get('engagement', 0),
+                        'total_reactions': total_reactions,
+                        'like_count': like_count,
+                        'praise_count': praise_count,
+                        'empathy_count': empathy_count,
+                        'interest_count': interest_count,
+                        'appreciation_count': appreciation_count,
+                        'entertainment_count': entertainment_count
+                    }
+                    
+                    post_metrics.append(post_metric)
+                    
+                except Exception as e:
+                    print(f"   Erreur lors du traitement du post {post_urn}: {e}")
+        
+        return post_metrics
+    
     def get_all_post_metrics(self):
-        """Récupère toutes les métriques pour tous les posts de l'organisation"""
-        # Récupérer tous les posts
-        posts_data = self.get_organization_posts(count=100)
+        """Récupère toutes les métriques pour tous les posts de l'organisation (VERSION OPTIMISÉE)"""
+        # Récupérer les posts normaux (originaux + reposts avec commentaire)
+        posts_data = self.get_organization_posts()
         
         if not posts_data or 'elements' not in posts_data or not posts_data['elements']:
             print("   Aucun post récupéré.")
             return []
         
         all_posts = posts_data['elements']
-        print(f"   Analyse de {len(all_posts)} posts...")
+        print(f"   Analyse de {len(all_posts)} posts (originaux + reposts avec commentaire)...")
         
-        # Liste pour stocker les métriques de tous les posts
-        post_metrics = []
-        skipped_posts = 0
+        # Récupérer les instant reposts (reposts sans commentaire)
+        instant_reposts = self.get_organization_instant_reposts()
         
-        # Date limite pour les posts (filtrer les posts plus anciens que 24 mois)
-        cutoff_date = datetime.now() - timedelta(days=730)
+        # Récupérer les détails des instant reposts
+        if instant_reposts:
+            repost_urns = [r['repost_urn'] for r in instant_reposts]
+            repost_details = self.get_instant_repost_details(repost_urns)
+            
+            # Convertir les instant reposts en format de post pour traitement uniforme
+            for repost in instant_reposts:
+                details = repost_details.get(repost['repost_urn'], {})
+                
+                # Créer un objet post-like pour les instant reposts
+                instant_post = {
+                    'id': repost['repost_urn'],
+                    'publishedAt': details.get('createdAt', int(datetime.now().timestamp() * 1000)),
+                    'commentary': '',  # Pas de commentaire pour les instant reposts
+                    'author': f"urn:li:organization:{self.organization_id}",
+                    'content': {},
+                    '_is_instant_repost': True,
+                    '_original_post': repost['original_post']
+                }
+                all_posts.append(instant_post)
+        
+        print(f"   Total à analyser: {len(all_posts)} posts (incluant {len(instant_reposts)} reposts instantanés)")            
+            
+        # Date limite pour les posts
+        cutoff_date = datetime.now() - timedelta(days=self.skip_old_posts_days)
         cutoff_timestamp = int(cutoff_date.timestamp() * 1000)
         
-        # Traiter chaque post
-        for i, post in enumerate(all_posts, 1):
-            post_urn = post['id']
-            
-            # Déterminer le type de post
-            if "share" in post_urn:
-                post_type = "share"
-            elif "ugcPost" in post_urn:
-                post_type = "ugcPost"
-            elif "post" in post_urn:
-                post_type = "post"  # Pour l'API REST
-            else:
-                post_type = "unknown"
-            
+        # Filtrer les posts trop anciens
+        filtered_posts = []
+        skipped_posts = 0
+        
+        for post in all_posts:
             # Vérifier si le post est trop ancien
-            if 'created' in post and 'time' in post['created']:
+            if 'publishedAt' in post:  # API REST
+                if post['publishedAt'] < cutoff_timestamp:
+                    skipped_posts += 1
+                    continue
+            elif 'created' in post and 'time' in post['created']:  # API v2
                 if post['created']['time'] < cutoff_timestamp:
                     skipped_posts += 1
                     continue
             
-            if i % 10 == 1:  # Afficher la progression tous les 10 posts
-                print(f"   Progression: {i}/{len(all_posts)} posts analysés")
+            filtered_posts.append(post)
+        
+        print(f"   Posts filtrés: {len(filtered_posts)} posts à analyser, {skipped_posts} posts ignorés (trop anciens)")
+        
+        # Limiter encore si nécessaire
+        if len(filtered_posts) > self.max_posts_to_analyze:
+            filtered_posts = filtered_posts[:self.max_posts_to_analyze]
+            print(f"   Limitation à {self.max_posts_to_analyze} posts les plus récents")
+        
+        # Traiter les posts par lots
+        batch_size = 10
+        all_metrics = []
+        
+        for i in range(0, len(filtered_posts), batch_size):
+            batch = filtered_posts[i:i+batch_size]
+            print(f"   Traitement du lot {i//batch_size + 1}/{(len(filtered_posts)-1)//batch_size + 1} ({len(batch)} posts)")
             
-            # Vérifier l'auteur du post
-            org_urn = f"urn:li:organization:{self.organization_id}"
-            if post.get('author', '') != org_urn:
-                # On continue quand même
-                pass
+            # Traiter le lot en parallèle
+            batch_metrics = self.process_post_batch(batch)
+            all_metrics.extend(batch_metrics)
             
-            # Extraire le contenu du post
-            content = self.extract_post_content(post)
-            
-            # Récupérer les actions sociales
-            try:
-                social_actions = self.get_post_social_actions(post_urn)
-                if not social_actions:
-                    social_actions = {'likesSummary': {}, 'commentsSummary': {}}
-            except Exception as e:
-                social_actions = {'likesSummary': {}, 'commentsSummary': {}}
-            
-            # Récupérer les statistiques détaillées
-            share_stats = {}
-            try:
-                if post_type == "share":
-                    share_stats = self.get_share_statistics(post_urn)
-                elif post_type == "post":
-                    # Pour les posts de l'API REST, utiliser une méthode différente
-                    share_stats = self.get_post_statistics_rest(post_urn)
-                else:
-                    share_stats = self.get_ugcpost_statistics(post_urn)
-            except Exception as e:
-                pass
-            
-            # Récupérer les réactions détaillées
-            reactions = {}
-            try:
-                reactions = self.get_post_reactions(post_urn)
-            except Exception as e:
-                pass
-            
-            # Pause pour respecter les limites de l'API
-            time.sleep(2)
-            
-            # Extraire les métriques
-            likes_summary = social_actions.get('likesSummary', {})
-            comments_summary = social_actions.get('commentsSummary', {})
-            
-            # Extraire les compteurs pour chaque type de réaction
-            like_count = reactions.get('LIKE', {}).get('count', 0)
-            praise_count = reactions.get('PRAISE', {}).get('count', 0)
-            empathy_count = reactions.get('EMPATHY', {}).get('count', 0)
-            interest_count = reactions.get('INTEREST', {}).get('count', 0)
-            appreciation_count = reactions.get('APPRECIATION', {}).get('count', 0)
-            entertainment_count = reactions.get('ENTERTAINMENT', {}).get('count', 0)
-            
-            # Calculer le total des réactions
-            total_reactions = (like_count + praise_count + empathy_count + 
-                              interest_count + appreciation_count + entertainment_count)
-            
-            # Agrégation des métriques avec formatage en français
-            post_metric = {
-                'post_id': post_urn,
-                'post_type': self.format_post_type(post_type),
-                'creation_date': content['creation_date'],
-                'text': content['text'],
-                'media_type': self.format_media_type(content['media_type']),
-                'media_url': content['media_url'],
-                'author': content['author'],
-                'total_comments': comments_summary.get('aggregatedTotalComments', 0),
-                'impressions': share_stats.get('impressionCount', 0),
-                'unique_impressions': share_stats.get('uniqueImpressionsCount', 0),
-                'clicks': share_stats.get('clickCount', 0),
-                'shares': share_stats.get('shareCount', 0),
-                'engagement_rate': share_stats.get('engagement', 0),
-                'total_reactions': total_reactions,
-                'like_count': like_count,
-                'praise_count': praise_count,
-                'empathy_count': empathy_count,
-                'interest_count': interest_count,
-                'appreciation_count': appreciation_count,
-                'entertainment_count': entertainment_count
-            }
-            
-            post_metrics.append(post_metric)
+            # Pause courte entre les lots
+            if i + batch_size < len(filtered_posts):
+                time.sleep(0.5)
         
         # Trier par date de création (plus récent au plus ancien)
-        post_metrics.sort(key=lambda x: x['creation_date'] if x['creation_date'] else '', reverse=True)
+        all_metrics.sort(key=lambda x: x['creation_date'] if x['creation_date'] else '', reverse=True)
         
-        print(f"   Analyse terminée. {len(post_metrics)} posts analysés, {skipped_posts} posts ignorés.")
-        return post_metrics
+        print(f"   Analyse terminée. {len(all_metrics)} posts analysés avec succès.")
+        return all_metrics
+
+# Le reste du code (GoogleSheetsExporter et MultiOrganizationPostMetricsTracker) reste identique
+# mais avec quelques ajustements mineurs...
 
 class GoogleSheetsExporter:
     """Classe pour exporter les données vers Google Sheets"""
@@ -769,63 +960,171 @@ class GoogleSheetsExporter:
     def format_columns_for_looker(self, worksheet, headers):
         """Applique le formatage approprié aux colonnes pour que Looker détecte correctement les types"""
         try:
-            # Définir les types de colonnes
-            # Les indices sont basés sur l'ordre des headers définis dans update_post_metrics_sheet
+            # Vérifier le nombre de colonnes disponibles dans la feuille
+            actual_col_count = worksheet.col_count
+            max_col_index = len(headers) - 1  # Index maximum basé sur les en-têtes réels
+            
+            print(f"   Feuille a {actual_col_count} colonnes, headers: {len(headers)}")
+            
+            # Définir les types de colonnes (ajusté pour les nouvelles colonnes)
             column_formats = {
                 # Colonnes de texte
                 0: {"numberFormat": {"type": "TEXT"}},  # Post ID
                 1: {"numberFormat": {"type": "TEXT"}},  # Type de post
-                3: {"numberFormat": {"type": "TEXT"}},  # Texte du post
-                4: {"numberFormat": {"type": "TEXT"}},  # Type de média
-                5: {"numberFormat": {"type": "TEXT"}},  # URL du média
-                6: {"numberFormat": {"type": "TEXT"}},  # Auteur
+                2: {"numberFormat": {"type": "TEXT"}},  # Sous-type
+                3: {"numberFormat": {"type": "TEXT"}},  # Est un repost
+                4: {"numberFormat": {"type": "TEXT"}},  # Post original
+                6: {"numberFormat": {"type": "TEXT"}},  # Texte du post
+                7: {"numberFormat": {"type": "TEXT"}},  # Type de média
+                8: {"numberFormat": {"type": "TEXT"}},  # URL du média
+                9: {"numberFormat": {"type": "TEXT"}},  # Auteur
                 
                 # Colonne datetime
-                2: {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}},  # Date de création
-                30: {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}},  # Date de collecte
+                5: {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}},  # Date de création
+                31: {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}},  # Date de collecte (index 31 = 32e colonne)
                 
                 # Colonnes numériques (entiers)
-                7: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},   # Impressions
-                8: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},   # Impressions uniques
-                9: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},   # Clics
-                10: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Partages
-                12: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Nombre de commentaires
-                13: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Total des réactions
-                14: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # J'aime
-                15: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Célébration
-                16: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # J'adore
-                17: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Intéressant
-                18: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Soutien
-                19: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Amusant
-                28: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Engagements totaux
+                10: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Affichages
+                11: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Personnes atteintes
+                12: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Clics
+                13: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Partages
+                15: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Nombre de commentaires
+                16: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Total des réactions
+                17: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # J'aime
+                18: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Bravo
+                19: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # J'adore
+                20: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Instructif
+                21: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Soutien
+                22: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Amusant
+                30: {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}},  # Nbre d'interactions (index 30 = 31e colonne)
                 
                 # Colonnes pourcentage
-                11: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # Taux d'engagement
-                20: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % J'aime
-                21: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Célébration
-                22: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % J'adore
-                23: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Intéressant
-                24: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Soutien
-                25: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Amusant
+                14: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # Taux d'engagement
+                23: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % J'aime
+                24: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Bravo
+                25: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % J'adore
+                26: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Instructif
+                27: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Soutien
+                28: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Amusant
             }
             
-            # Appliquer le formatage pour chaque colonne
+            # CORRECTION: Filtrer les colonnes qui existent réellement
+            valid_column_formats = {}
             for col_idx, format_spec in column_formats.items():
-                col_letter = get_column_letter(col_idx)
-                range_name = f"{col_letter}2:{col_letter}"
+                if col_idx <= max_col_index and col_idx < actual_col_count:
+                    valid_column_formats[col_idx] = format_spec
+                else:
+                    print(f"   Colonne {col_idx} ignorée (dépasse les limites: max_headers={max_col_index}, sheet_cols={actual_col_count})")
+            
+            # Grouper les colonnes pour le formatage par lot
+            # Traiter par groupes de 5 colonnes pour éviter le rate limiting
+            columns_to_format = list(valid_column_formats.items())
+            batch_size = 5
+            
+            for i in range(0, len(columns_to_format), batch_size):
+                batch = columns_to_format[i:i+batch_size]
                 
-                try:
-                    worksheet.format(range_name, format_spec)
-                except Exception as e:
-                    print(f"   Avertissement: Impossible de formater la colonne {col_letter}: {e}")
+                # Appliquer le formatage pour chaque colonne du lot
+                for col_idx, format_spec in batch:
+                    col_letter = get_column_letter(col_idx)
+                    range_name = f"{col_letter}2:{col_letter}"
+                    
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            worksheet.format(range_name, format_spec)
+                            break  # Succès, sortir de la boucle de retry
+                        except gspread.exceptions.APIError as e:
+                            if "exceeds grid limits" in str(e):
+                                print(f"   Colonne {col_letter} (index {col_idx}) dépasse les limites de la feuille - ignorée")
+                                break
+                            elif self.handle_rate_limit(e) and attempt < max_retries - 1:
+                                continue
+                            else:
+                                print(f"   Avertissement: Impossible de formater la colonne {col_letter}: {e}")
+                                break
+                        except Exception as e:
+                            print(f"   Avertissement: Impossible de formater la colonne {col_letter}: {e}")
+                            break
+                
+                # Pause entre les lots pour éviter le rate limiting
+                if i + batch_size < len(columns_to_format):
+                    time.sleep(2)
             
             print("   ✓ Formatage des colonnes appliqué pour Looker")
             
         except Exception as e:
             print(f"   Erreur lors du formatage des colonnes: {e}")
+            
+            
+    def format_columns_robust(self, sheet, column_formats, max_rows=1000):
+        """Applique le formatage de manière robuste"""
+        for col_idx, format_spec in column_formats.items():
+            col_letter = get_column_letter(col_idx)
+            range_name = f"{col_letter}2:{col_letter}{max_rows}"
+            
+            try:
+                sheet.format(range_name, format_spec)
+            except Exception as e:
+                print(f"   Avertissement: Impossible de formater la colonne {col_letter}: {e}")
+    
+    def apply_post_metrics_formatting(self, sheet, headers, data_rows_count):
+        """Applique le formatage spécifique pour les métriques de posts"""
+        
+        column_formats = {
+            # Colonnes de texte
+            0: {"numberFormat": {"type": "TEXT"}},  # Post ID
+            1: {"numberFormat": {"type": "TEXT"}},  # Type de post
+            2: {"numberFormat": {"type": "TEXT"}},  # Sous-type
+            3: {"numberFormat": {"type": "TEXT"}},  # Est un repost
+            4: {"numberFormat": {"type": "TEXT"}},  # Post original
+            6: {"numberFormat": {"type": "TEXT"}},  # Texte du post
+            7: {"numberFormat": {"type": "TEXT"}},  # Type de média
+            8: {"numberFormat": {"type": "TEXT"}},  # URL du média
+            9: {"numberFormat": {"type": "TEXT"}},  # Auteur
+            
+            # Colonnes datetime
+            5: {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}},  # Date de création
+            31: {"numberFormat": {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}},  # Date de collecte
+            
+            # Colonnes pourcentage
+            14: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # Taux d'engagement
+            23: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % J'aime
+            24: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Bravo
+            25: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % J'adore
+            26: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Instructif
+            27: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Soutien
+            28: {"numberFormat": {"type": "PERCENT", "pattern": "0.00%"}}, # % Amusant
+        }
+        
+        # Ajouter toutes les colonnes numériques
+        number_columns = [10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 30]
+        for col in number_columns:
+            column_formats[col] = {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}
+        
+        # Appliquer le formatage robuste
+        self.format_columns_robust(sheet, column_formats, max_rows=data_rows_count + 10)
+    
+    def handle_rate_limit(self, error):
+        """Gère les erreurs de rate limit de Google Sheets"""
+        error_str = str(error)
+        if "429" in error_str or "Quota exceeded" in error_str:
+            if "per minute" in error_str:
+                wait_time = 65  # Attendre 65 secondes pour les limites par minute
+                print(f"   ⏳ Rate limit Google Sheets atteint. Attente de {wait_time} secondes...")
+            elif "per user per 100 seconds" in error_str:
+                wait_time = 105  # Attendre 105 secondes
+                print(f"   ⏳ Rate limit Google Sheets atteint (100s). Attente de {wait_time} secondes...")
+            else:
+                wait_time = 30  # Par défaut
+                print(f"   ⏳ Rate limit Google Sheets atteint. Attente de {wait_time} secondes...")
+            
+            time.sleep(wait_time)
+            return True
+        return False
     
     def update_post_metrics_sheet(self, post_metrics):
-        """Met à jour la feuille des métriques de posts"""
+        """Met à jour la feuille des métriques de posts avec gestion améliorée des colonnes"""
         try:
             # Vérifier si la feuille existe ou la créer
             worksheet_name = "Métriques des Posts"
@@ -833,59 +1132,99 @@ class GoogleSheetsExporter:
             try:
                 worksheet = self.spreadsheet.worksheet(worksheet_name)
                 print(f"   Feuille '{worksheet_name}' trouvée")
+                
+                # CORRECTION: S'assurer d'avoir exactement 32 colonnes (0-31)
+                required_cols = 32
+                if worksheet.col_count < required_cols:
+                    cols_to_add = required_cols - worksheet.col_count
+                    worksheet.add_cols(cols_to_add)
+                    print(f"   Colonnes ajoutées: {worksheet.col_count - cols_to_add} → {worksheet.col_count}")
+                elif worksheet.col_count > required_cols:
+                    # Si on a trop de colonnes, on les garde mais on n'utilisera que les 32 premières
+                    print(f"   Feuille a {worksheet.col_count} colonnes (utilisation des {required_cols} premières)")
+                    
             except gspread.exceptions.WorksheetNotFound:
                 worksheet = self.spreadsheet.add_worksheet(title=worksheet_name, rows=1000, cols=32)
-                print(f"   Nouvelle feuille '{worksheet_name}' créée")
+                print(f"   Nouvelle feuille '{worksheet_name}' créée avec 32 colonnes")
             
-            # Définir les en-têtes
+            # Définir les en-têtes avec les nouvelles colonnes
             headers = [
-                # Informations sur le post
-                "Post ID",
-                "Type de post",
-                "Date de création",
-                "Texte du post",
-                "Type de média",
-                "URL du média",
-                "Auteur",
+                # Identification du post
+                "Identifiant unique du post",           # 0
+                "Type de publication",                  # 1
+                "Sous-type de publication",             # 2
+                "Est un repost",                        # 3
+                "Post original",                        # 4
+                "Date et heure de publication",         # 5
+                "Texte de la publication",              # 6
+                "Type de média",                        # 7
+                "Lien du média",                        # 8
+                "Auteur de la publication",             # 9
                 
-                # Métriques d'impressions et d'interactions
-                "Impressions",
-                "Impressions uniques",
-                "Clics",
-                "Partages",
-                "Taux d'engagement (%)",
-                "Nombre de commentaires",
+                # Métriques de portée
+                "Nbre d'affichages",                    # 10
+                "Nbre de personnes atteintes",          # 11
                 
-                # Métriques de réactions
-                "Total des réactions",
-                "J'aime (Like)",
-                "Célébration (Praise)",
-                "J'adore (Empathy)",
-                "Intéressant (Interest)",
-                "Soutien (Appreciation)", 
-                "Amusant (Entertainment)",
-                "% J'aime",
-                "% Célébration",
-                "% J'adore",
-                "% Intéressant", 
-                "% Soutien",
-                "% Amusant",
+                # Métriques d'engagement
+                "Nbre de clics",                        # 12
+                "Nbre de partages",                     # 13
+                "Taux d'engagement de la publication",  # 14
+                "Nbre de commentaires",                 # 15
                 
-                # Nouvelle colonne pour les engagements totaux
-                "Engagements totaux",
+                # Détail des réactions
+                "Nbre de réactions",                    # 16
+                "J'aime",                               # 17
+                "Bravo",                                # 18
+                "J'adore",                              # 19
+                "Instructif",                           # 20
+                "Soutien",                              # 21
+                "Amusant",                              # 22
                 
-                # Date de récupération des données
-                "Date de collecte"
+                # Pourcentages des réactions
+                "% J'aime",                             # 23
+                "% Bravo",                              # 24
+                "% J'adore",                            # 25
+                "% Instructif",                         # 26
+                "% Soutien",                            # 27
+                "% Amusant",                            # 28
+                
+                # Métrique globale
+                "Nbre d'interactions",                  # 29
+                
+                # Métadonnées
+                "Date de collecte des données"          # 30
             ]
             
-            # Mettre à jour les en-têtes
-            worksheet.update(values=[headers], range_name='A1')
+            # VÉRIFICATION: S'assurer qu'on a exactement 31 headers (index 0-30)
+            print(f"   Nombre d'en-têtes définis: {len(headers)} (index 0-{len(headers)-1})")
             
-            # Formater les en-têtes
-            worksheet.format('A1:' + get_column_letter(len(headers)-1) + '1', {
-                'textFormat': {'bold': True},
-                'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
-            })
+            # Mettre à jour les en-têtes avec retry
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    worksheet.update(values=[headers], range_name='A1')
+                    break
+                except gspread.exceptions.APIError as e:
+                    if self.handle_rate_limit(e) and attempt < max_retries - 1:
+                        continue
+                    else:
+                        raise
+            
+            # Formater les en-têtes avec retry
+            for attempt in range(max_retries):
+                try:
+                    header_range = f'A1:{get_column_letter(len(headers)-1)}1'
+                    worksheet.format(header_range, {
+                        'textFormat': {'bold': True},
+                        'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+                    })
+                    break
+                except gspread.exceptions.APIError as e:
+                    if self.handle_rate_limit(e) and attempt < max_retries - 1:
+                        continue
+                    else:
+                        print(f"   Avertissement: Impossible de formater les en-têtes: {e}")
+                        break
             
             # Préparer les données
             rows = []
@@ -897,100 +1236,147 @@ class GoogleSheetsExporter:
                 if len(text) > 1000:
                     text = text[:997] + "..."
                 
-                # Calculer le taux d'engagement (en décimal pour le format PERCENT)
-                # Si engagement_rate est déjà en décimal (ex: 0.05 pour 5%), on le garde
-                # Si c'est déjà en pourcentage (ex: 5 pour 5%), on divise par 100
-                engagement_rate = post['engagement_rate'] if isinstance(post['engagement_rate'], (int, float)) else 0
+                # CORRECTION - S'assurer que le taux d'engagement est en décimal
+                engagement_rate = ensure_percentage_as_decimal(post['engagement_rate'])
                 
-                # Calculer les pourcentages de chaque type de réaction (en décimal pour le format PERCENT)
+                # Calculer les pourcentages de chaque type de réaction (en décimal)
                 total_reactions = post['total_reactions']
-                pct_like = (post['like_count'] / total_reactions) if total_reactions > 0 else 0
-                pct_praise = (post['praise_count'] / total_reactions) if total_reactions > 0 else 0
-                pct_empathy = (post['empathy_count'] / total_reactions) if total_reactions > 0 else 0
-                pct_interest = (post['interest_count'] / total_reactions) if total_reactions > 0 else 0
-                pct_appreciation = (post['appreciation_count'] / total_reactions) if total_reactions > 0 else 0
-                pct_entertainment = (post['entertainment_count'] / total_reactions) if total_reactions > 0 else 0
+                pct_like = float(post['like_count'] / total_reactions) if total_reactions > 0 else 0.0
+                pct_praise = float(post['praise_count'] / total_reactions) if total_reactions > 0 else 0.0
+                pct_empathy = float(post['empathy_count'] / total_reactions) if total_reactions > 0 else 0.0
+                pct_interest = float(post['interest_count'] / total_reactions) if total_reactions > 0 else 0.0
+                pct_appreciation = float(post['appreciation_count'] / total_reactions) if total_reactions > 0 else 0.0
+                pct_entertainment = float(post['entertainment_count'] / total_reactions) if total_reactions > 0 else 0.0
                 
                 # Calculer les engagements totaux
-                total_engagements = post['clicks'] + post['shares'] + post['total_comments'] + post['total_reactions']
+                total_engagements = int(post['clicks'] + post['shares'] + post['total_comments'] + post['total_reactions'])
                 
                 row = [
-                    # Informations sur le post
-                    post['post_id'],
-                    post['post_type'],
-                    post['creation_date'],
-                    text,
-                    post['media_type'],
-                    post['media_url'],
-                    post['author'],
+                    # Informations sur le post (index 0-9)
+                    str(post['post_id']),
+                    str(post['post_type']),
+                    str(post.get('sous_type', '')),
+                    "Oui" if post.get('is_reshare', False) else "Non",
+                    str(post.get('original_post', '')),
+                    str(post['creation_date']),
+                    str(text),
+                    str(post['media_type']),
+                    str(post['media_url']) if post['media_url'] else '',
+                    str(post['author']),
                     
-                    # Métriques d'impressions et d'interactions
-                    post['impressions'],
-                    post['unique_impressions'],
-                    post['clicks'],
-                    post['shares'],
-                    engagement_rate,
-                    post['total_comments'],
+                    # Métriques - s'assurer que ce sont des entiers (index 10-15)
+                    int(post['impressions']),
+                    int(post['unique_impressions']),
+                    int(post['clicks']),
+                    int(post['shares']),
+                    float(engagement_rate),  # Utiliser la valeur convertie
+                    int(post['total_comments']),
                     
-                    # Métriques de réactions
-                    post['total_reactions'],
-                    post['like_count'],
-                    post['praise_count'],
-                    post['empathy_count'],
-                    post['interest_count'],
-                    post['appreciation_count'],
-                    post['entertainment_count'],
+                    # Métriques de réactions - entiers (index 16-22)
+                    int(post['total_reactions']),
+                    int(post['like_count']),
+                    int(post['praise_count']),
+                    int(post['empathy_count']),
+                    int(post['interest_count']),
+                    int(post['appreciation_count']),
+                    int(post['entertainment_count']),
                     
-                    # Pourcentages de réactions (en décimal pour le format PERCENT)
-                    pct_like,
-                    pct_praise,
-                    pct_empathy,
-                    pct_interest,
-                    pct_appreciation,
-                    pct_entertainment,
+                    # Pourcentages de réactions - décimaux pour PERCENT (index 23-28)
+                    float(pct_like),
+                    float(pct_praise),
+                    float(pct_empathy),
+                    float(pct_interest),
+                    float(pct_appreciation),
+                    float(pct_entertainment),
                     
-                    # Engagements totaux
-                    total_engagements,
+                    # Engagements totaux (index 29)
+                    int(total_engagements),
                     
-                    # Date de collecte
-                    collection_date
+                    # Date de collecte (index 30)
+                    str(collection_date)
                 ]
                 rows.append(row)
             
-            # Effacer les données existantes (sauf les en-têtes)
+            # Vérifier que chaque ligne a exactement le bon nombre de colonnes
+            expected_cols = len(headers)
+            for i, row in enumerate(rows):
+                if len(row) != expected_cols:
+                    print(f"   Avertissement: Ligne {i+1} a {len(row)} colonnes au lieu de {expected_cols}")
+            
+            # Effacer les données existantes (sauf les en-têtes) avec retry
             if worksheet.row_count > 1:
-                worksheet.batch_clear(["A2:Z1000"])
+                for attempt in range(max_retries):
+                    try:
+                        clear_range = f"A2:{get_column_letter(len(headers)-1)}1000"
+                        worksheet.batch_clear([clear_range])
+                        break
+                    except gspread.exceptions.APIError as e:
+                        if self.handle_rate_limit(e) and attempt < max_retries - 1:
+                            continue
+                        else:
+                            print(f"   Avertissement: Impossible d'effacer les données: {e}")
+                            break
             
             # Ajouter les nouvelles données
             if rows:
                 # Diviser en lots pour éviter les limites de l'API
-                batch_size = 100
+                batch_size = 50  # Réduit de 100 à 50 pour éviter les rate limits
                 for i in range(0, len(rows), batch_size):
                     batch = rows[i:i+batch_size]
                     start_row = i + 2  # +2 car on commence après l'en-tête
-                    worksheet.update(values=batch, range_name=f'A{start_row}')
-                    print(f"   Lot {i//batch_size + 1}/{(len(rows)-1)//batch_size + 1} exporté ({len(batch)} lignes)")
-                    # Pause entre les lots
+                    
+                    # Retry pour chaque lot
+                    for attempt in range(max_retries):
+                        try:
+                            worksheet.update(values=batch, range_name=f'A{start_row}')
+                            print(f"   Lot {i//batch_size + 1}/{(len(rows)-1)//batch_size + 1} exporté ({len(batch)} lignes)")
+                            break
+                        except gspread.exceptions.APIError as e:
+                            if self.handle_rate_limit(e) and attempt < max_retries - 1:
+                                continue
+                            else:
+                                raise
+                    
+                    # Pause entre les lots pour éviter le rate limiting
                     if i + batch_size < len(rows):
-                        time.sleep(2)
+                        time.sleep(3)  # Augmenté de 2 à 3 secondes
                 
                 print(f"   Données mises à jour dans la feuille '{worksheet_name}'")
                 
-                # Appliquer le formatage pour Looker
+                # Appliquer le formatage pour Looker avec la fonction corrigée
                 self.format_columns_for_looker(worksheet, headers)
                 
                 # Trier les données par date (du plus récent au plus ancien)
-                try:
-                    worksheet.sort((3, 'des'), range=f'A2:{get_column_letter(len(headers)-1)}{len(rows)+1}')
-                    print("   Données triées par date (du plus récent au plus ancien)")
-                except ValueError as e:
-                    if "should be specified as sort order" in str(e):
-                        worksheet.sort((3, 'desc'), range=f'A2:{get_column_letter(len(headers)-1)}{len(rows)+1}')
+                max_sort_retries = 3
+                for sort_attempt in range(max_sort_retries):
+                    try:
+                        sort_range = f'A2:{get_column_letter(len(headers)-1)}{len(rows)+1}'
+                        worksheet.sort((6, 'des'), range=sort_range)
                         print("   Données triées par date (du plus récent au plus ancien)")
-                    else:
-                        raise e
-                except Exception as sort_error:
-                    print(f"   Avertissement: Impossible de trier les données: {sort_error}")
+                        break
+                    except ValueError as e:
+                        if "should be specified as sort order" in str(e):
+                            try:
+                                worksheet.sort((6, 'desc'), range=sort_range)
+                                print("   Données triées par date (du plus récent au plus ancien)")
+                                break
+                            except Exception as e2:
+                                if sort_attempt < max_sort_retries - 1:
+                                    if self.handle_rate_limit(e2):
+                                        continue
+                                print(f"   Avertissement: Impossible de trier les données: {e2}")
+                                break
+                        else:
+                            raise e
+                    except gspread.exceptions.APIError as e:
+                        if self.handle_rate_limit(e) and sort_attempt < max_sort_retries - 1:
+                            continue
+                        else:
+                            print(f"   Avertissement: Impossible de trier les données: {e}")
+                            break
+                    except Exception as sort_error:
+                        print(f"   Avertissement: Impossible de trier les données: {sort_error}")
+                        break
             else:
                 print("   Aucune donnée à exporter")
             
@@ -1221,18 +1607,24 @@ class MultiOrganizationPostMetricsTracker:
         
         print(f"   ✅ Métriques récupérées pour {len(post_metrics)} posts")
         
-        # Chemin vers les credentials
-        credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
+        # Afficher le nombre de reposts
+        reposts_count = sum(1 for p in post_metrics if p.get('is_reshare', False))
+        instant_reposts_count = sum(1 for p in post_metrics if p.get('sous_type') == 'Repost instantané')
+        print(f"   📊 Dont {reposts_count} reposts ({instant_reposts_count} instantanés)")
         
-        # Pour Google Cloud Run, utiliser le chemin monté
-        if os.getenv('K_SERVICE'):
-            credentials_path = Path('/app/credentials/service_account_credentials.json')
+        # Déterminer le chemin des credentials selon l'environnement
+        if os.getenv('K_SERVICE'):  # Cloud Run/Functions
+            credentials_path = Path('/tmp/credentials/service_account_credentials.json')
+        else:  # Local
+            credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
         
         if not credentials_path.exists():
             # Essayer de créer les credentials depuis une variable d'environnement
             creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
             if creds_json:
-                credentials_path.parent.mkdir(parents=True, exist_ok=True)
+                # Créer le dossier seulement si on n'est pas dans /app
+                if not str(credentials_path).startswith('/app'):
+                    credentials_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(credentials_path, 'w') as f:
                     f.write(creds_json)
                 print("   ✅ Credentials créés depuis la variable d'environnement")
@@ -1262,6 +1654,7 @@ def main():
     """Fonction principale"""
     print("="*60)
     print("LINKEDIN MULTI-ORGANISATION POST METRICS TRACKER")
+    print("Version avec support des reposts instantanés")
     print("="*60)
     print(f"Date d'exécution: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -1286,12 +1679,17 @@ def main():
     print(f"\n⚙️  Configuration:")
     print(f"   - Email admin: {tracker.admin_email}")
     print(f"   - Type de données: Métriques détaillées des posts")
+    print(f"   - Inclut: Posts originaux, reposts avec commentaire, reposts instantanés")
     
     # Demander confirmation si plus de 5 organisations
     if len(tracker.organizations) > 5:
         print(f"\n⚠️  Attention: {len(tracker.organizations)} organisations à traiter.")
         print("   Cela peut prendre du temps et consommer des quotas API.")
-        response = input("   Continuer ? (o/N): ")
+        if os.getenv('AUTOMATED_MODE', 'false').lower() == 'true':
+            response = 'o'
+            print('🤖 Mode automatisé: réponse automatique \'o\'')
+        else:
+            response = input("   Continuer ? (o/N): ")
         if response.lower() != 'o':
             print("Annulé.")
             sys.exit(0)

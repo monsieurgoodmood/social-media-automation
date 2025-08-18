@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LinkedIn Multi-Organization Share Statistics Tracker
+LinkedIn Multi-Organization - Suivi des Statistiques de Partage
 Ce script collecte les statistiques de partage pour plusieurs organisations LinkedIn
 et les enregistre dans Google Sheets avec un formatage optimisé pour Looker Studio.
 """
@@ -23,6 +23,38 @@ from gspread.exceptions import APIError
 
 # Chargement des variables d'environnement
 load_dotenv()
+
+
+def ensure_percentage_as_decimal(value):
+    """
+    Convertit une valeur en décimal pour Google Sheets PERCENT
+    
+    Args:
+        value: La valeur à convertir (peut être 5 pour 5% ou 0.05 pour 5%)
+    
+    Returns:
+        float: Valeur en décimal (0.05 pour 5%)
+    """
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, str):
+        # Enlever le symbole % si présent
+        value = value.replace('%', '').strip()
+        try:
+            value = float(value)
+        except:
+            return 0.0
+    
+    if isinstance(value, (int, float)):
+        # Si la valeur est > 1, on assume que c'est un pourcentage
+        if value > 1:
+            return float(value / 100)
+        else:
+            return float(value)
+    
+    return 0.0
+
 
 def safe_sheets_operation(operation, *args, max_retries=5, **kwargs):
     """
@@ -86,14 +118,14 @@ class LinkedInShareStatisticsTracker:
         self.access_token = access_token
         self.organization_id = organization_id
         self.sheet_name = sheet_name or f"LinkedIn_Share_Stats_{organization_id}"
-        self.base_url = "https://api.linkedin.com/v2"
+        self.base_url = "https://api.linkedin.com/rest"
         
     def get_headers(self):
         """Retourne les en-têtes pour les requêtes API"""
         return {
             "Authorization": f"Bearer {self.access_token}",
             "X-Restli-Protocol-Version": "2.0.0",
-            "LinkedIn-Version": "202312",
+            "LinkedIn-Version": "202505",
             "Content-Type": "application/json"
         }
     
@@ -188,7 +220,7 @@ class LinkedInShareStatisticsTracker:
         if not share_data or 'elements' not in share_data or len(share_data['elements']) == 0:
             print("   Aucune donnée de statistiques de partage valide trouvée.")
             # Initialiser avec des valeurs par défaut
-            stats['impressions'] = {'total': 0, 'unique': 0}
+            stats['affichages'] = {'total': 0, 'unique': 0}
             stats['engagement'] = {
                 'rate': 0,
                 'clicks': 0,
@@ -208,7 +240,7 @@ class LinkedInShareStatisticsTracker:
             if 'totalShareStatistics' not in element:
                 print("   Aucune statistique de partage trouvée dans les données.")
                 # Initialiser avec des valeurs par défaut
-                stats['impressions'] = {'total': 0, 'unique': 0}
+                stats['affichages'] = {'total': 0, 'unique': 0}
                 stats['engagement'] = {
                     'rate': 0,
                     'clicks': 0,
@@ -225,7 +257,7 @@ class LinkedInShareStatisticsTracker:
                 # Extraire les statistiques principales
                 share_stats = element['totalShareStatistics']
                 
-                stats['impressions'] = {
+                stats['affichages'] = {
                     'total': share_stats.get('impressionCount', 0),
                     'unique': share_stats.get('uniqueImpressionsCount', 0)
                 }
@@ -241,8 +273,8 @@ class LinkedInShareStatisticsTracker:
                 }
                 
                 # Calcul de métriques dérivées
-                if stats['impressions']['total'] > 0:
-                    stats['engagement']['click_through_rate'] = (stats['engagement']['clicks'] / stats['impressions']['total'])  # Décimal
+                if stats['affichages']['total'] > 0:
+                    stats['engagement']['click_through_rate'] = (stats['engagement']['clicks'] / stats['affichages']['total'])  # Décimal
                 else:
                     stats['engagement']['click_through_rate'] = 0
                     
@@ -256,8 +288,8 @@ class LinkedInShareStatisticsTracker:
                 
                 stats['engagement']['total_interactions'] = total_interactions
                 
-                if stats['impressions']['total'] > 0:
-                    stats['engagement']['interaction_rate'] = (total_interactions / stats['impressions']['total'])  # Décimal
+                if stats['affichages']['total'] > 0:
+                    stats['engagement']['interaction_rate'] = (total_interactions / stats['affichages']['total'])  # Décimal
                 else:
                     stats['engagement']['interaction_rate'] = 0
         
@@ -381,55 +413,72 @@ class GoogleSheetsExporter:
         except Exception as e:
             print(f"   Erreur lors de la vérification des permissions: {e}")
     
+    def _get_column_letter(self, col_idx):
+        """Convertit un indice de colonne (0-based) en lettre de colonne Excel"""
+        result = ""
+        col_idx = col_idx + 1  # Convertir de 0-based à 1-based
+        while col_idx > 0:
+            col_idx, remainder = divmod(col_idx - 1, 26)
+            result = chr(65 + remainder) + result
+        return result
+    
+    # Remplacer la section de formatage dans la méthode update_stats_sheet par ce code corrigé :
+
     def update_stats_sheet(self, stats):
         """Met à jour la feuille des statistiques avec UNE SEULE LIGNE (données lifetime)"""
         try:
-            # Définir les en-têtes optimisés pour Looker (sans espaces, caractères spéciaux)
+            # Définir les en-têtes optimisés pour Looker (sans espaces, caractères spéciaux) - RENOMMÉS EN FRANÇAIS
             headers = [
                 # Informations générales
-                "Date_Mesure", 
+                "Date_Snapshot_Donnees_Cumulees",  # Date à laquelle ce snapshot a été pris
                 
-                # Statistiques de partage (données cumulatives)
-                "Impressions_Totales", 
-                "Impressions_Uniques", 
-                "Taux_Engagement", 
-                "Clics_Totaux", 
-                "Likes_Totaux", 
-                "Commentaires_Totaux", 
-                "Partages_Totaux",
-                "Mentions_Partages_Totaux",
-                "Mentions_Commentaires_Totaux",
-                "Interactions_Totales", 
-                "Taux_Clic", 
-                "Taux_Interaction",
+                # --- STATISTIQUES CUMULÉES DEPUIS TOUJOURS (LIFETIME) ---
+                # Affichages totaux (au lieu d'impressions)
+                "Nbre_Affichages_Cumules_Historique",  # Total affichages depuis création de la page
+                "Nbre_Affichages_Uniques_Cumules_Historique",  # Personnes uniques atteintes historique
                 
-                # Statistiques lifetime de la page
-                "Vues_Page_Totales",
-                "Vues_Desktop",
-                "Vues_Mobile",
-                "Clics_Boutons_Desktop",
-                "Clics_Boutons_Mobile",
-                "Clics_Boutons_Totaux",
+                # Engagement global
+                "Tx_Engagement_Historique",  # Taux d'engagement global en % (PERCENT)
+                "Nbre_Clics_Cumules_Historique",  # Total des clics depuis toujours
+                "Nbre_Reactions_Cumulees_Historiques",  # Total des réactions depuis toujours
+                "Nbre_Commentaires_Cumules_Historiques",  # Total des commentaires depuis toujours
+                "Nbre_Partages_Cumules_Historiques",  # Total des partages depuis toujours
+                "Nbre_Mentions_Partage_Cumulees_Historiques",  # Total mentions dans partages historique
+                "Nbre_Mentions_Commentaires_Cumulees_Historiques",  # Total mentions dans commentaires historique
+                "Nbre_Interactions_Cumulees_Historiques",  # Somme de toutes les interactions historique
+                "Tx_Clic_Global_Historique",  # CTR global en % (PERCENT)
+                "Tx_Interaction_Global_Historique",  # Taux d'interaction global en % (PERCENT)
                 
-                # Vues par section
-                "Vues_Accueil",
-                "Vues_A_Propos",
-                "Vues_Personnes",
-                "Vues_Emplois",
-                "Vues_Carrieres",
-                "Vues_Vie_Entreprise",
+                # --- STATISTIQUES PAGE ENTREPRISE (LIFETIME) ---
+                # Vues de page totales
+                "Vues_Historiques_Page",  # Total vues page entreprise depuis création
+                "Vues_Page_Desktop_Historique",  # Total vues desktop historique
+                "Vues_Page_Mobile_Historique",  # Total vues mobile historique
                 
-                # Vues desktop par section
-                "Vues_Desktop_Accueil",
-                "Vues_Desktop_Carrieres",
-                "Vues_Desktop_Emplois",
-                "Vues_Desktop_Vie_Entreprise",
+                # Clics sur boutons CTA lifetime
+                "Nbre_Clics_Boutons_Desktop_Historique",  # Total clics CTA desktop historique
+                "Nbre_Clics_Boutons_Mobile_Historique",  # Total clics CTA mobile historique
+                "Nbre_Clics_Boutons_Historique",  # Total clics CTA historique
                 
-                # Vues mobile par section
-                "Vues_Mobile_Accueil",
-                "Vues_Mobile_Carrieres",
-                "Vues_Mobile_Emplois",
-                "Vues_Mobile_Vie_Entreprise"
+                # Vues par section (lifetime)
+                "Nbre_Vues_Accueil_Historique",  # Total vues page accueil historique
+                "Nbre_Vues_APropos_Historique",  # Total vues page À propos historique
+                "Nbre_Vues_Personnes_Historique",  # Total vues page Personnes historique
+                "Nbre_Vues_Emplois_Historique",  # Total vues page Emplois historique
+                "Vues_Carrieres_Total_Historique",  # Total vues page Carrières historique
+                "Vues_VieEntreprise_Total_Historique",  # Total vues Vie entreprise historique
+                
+                # Détail desktop par section (lifetime)
+                "Vues_Accueil_Desktop_Historique",  # Vues accueil desktop historique
+                "Vues_Carrieres_Desktop_Historique",  # Vues carrières desktop historique
+                "Vues_Emplois_Desktop_Historique",  # Vues emplois desktop historique
+                "Vues_VieEntreprise_Desktop_Historique",  # Vues vie entreprise desktop historique
+                
+                # Détail mobile par section (lifetime)
+                "Vues_Accueil_Mobile_Historique",  # Vues accueil mobile historique
+                "Vues_Carrieres_Mobile_Historique",  # Vues carrières mobile historique
+                "Vues_Emplois_Mobile_Historique",  # Vues emplois mobile historique
+                "Vues_VieEntreprise_Mobile_Historique"  # Vues vie entreprise mobile historique
             ]
             
             # Calculer le nombre de colonnes nécessaires
@@ -471,16 +520,21 @@ class GoogleSheetsExporter:
             
             # Préparer les nouvelles données (UNE SEULE LIGNE)
             views = stats['page_lifetime'].get('views', {})
-            
+
+            # Utiliser la fonction ensure_percentage_as_decimal pour les taux
+            engagement_rate = ensure_percentage_as_decimal(stats['engagement']['rate'])
+            click_through_rate = ensure_percentage_as_decimal(stats['engagement']['click_through_rate'])
+            interaction_rate = ensure_percentage_as_decimal(stats['engagement']['interaction_rate'])
+
             # Utiliser la date comme STRING (pas d'objet datetime)
             new_row = [
                 # Informations générales - Date comme string
                 stats['date'],  # STRING au lieu d'objet datetime
                 
-                # Statistiques de partage - Nombres entiers
-                stats['impressions']['total'],
-                stats['impressions']['unique'],
-                stats['engagement']['rate'],  # Décimal pour PERCENT
+                # Statistiques de partage - Nombres entiers (utilisant 'affichages' au lieu de 'impressions')
+                stats['affichages']['total'],
+                stats['affichages']['unique'],
+                engagement_rate,  # Décimal pour PERCENT
                 stats['engagement']['clicks'],
                 stats['engagement']['likes'],
                 stats['engagement']['comments'],
@@ -488,8 +542,8 @@ class GoogleSheetsExporter:
                 stats['engagement']['share_mentions'],
                 stats['engagement']['comment_mentions'],
                 stats['engagement']['total_interactions'],
-                stats['engagement']['click_through_rate'],  # Décimal pour PERCENT
-                stats['engagement']['interaction_rate'],  # Décimal pour PERCENT
+                click_through_rate,  # Décimal pour PERCENT
+                interaction_rate,  # Décimal pour PERCENT
                 
                 # Statistiques lifetime générales - Nombres entiers
                 views.get('all_page_views', 0),
@@ -525,49 +579,67 @@ class GoogleSheetsExporter:
             time.sleep(1)
             print(f"   Données lifetime mises à jour pour la date {stats['date']}")
             
-            # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO avec gestion des limites
+            # FORMATAGE OPTIMISÉ POUR LOOKER STUDIO - VERSION CORRIGÉE
+            print("   🎨 Application du formatage pour Looker Studio...")
             
-            # Formater les en-têtes
-            last_col_index = len(headers) - 1
-            last_col = self._get_column_letter(last_col_index)
+            # Créer un mapping des indices de colonnes vers les lettres
+            def get_column_letter_safe(col_index):
+                """Convertit un indice de colonne en lettre, mais seulement si l'index est valide"""
+                if col_index < 0 or col_index >= num_cols:
+                    return None
+                return self._get_column_letter(col_index)
+            
+            # 1. Formater la colonne Date (A) comme DATE
+            safe_sheets_operation(sheet.format, 'A:A', {
+                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
+            })
+            time.sleep(0.5)
+            
+            # 2. Formater les colonnes de pourcentages comme PERCENT
+            # Colonnes D (index 3), L (index 11), M (index 12)
+            percent_column_indices = [3, 11, 12]  # Tx_Engagement, Tx_Clic_Global, Tx_Interaction_Global
+            
+            for col_index in percent_column_indices:
+                col_letter = get_column_letter_safe(col_index)
+                if col_letter:  # Seulement si la colonne existe
+                    safe_sheets_operation(sheet.format, f'{col_letter}:{col_letter}', {
+                        "numberFormat": {"type": "PERCENT", "pattern": "0.00%"}
+                    })
+                    time.sleep(0.3)
+            
+            # 3. Formater toutes les autres colonnes numériques comme NUMBER
+            # Toutes les colonnes sauf A (date) et les colonnes de pourcentage
+            number_column_indices = []
+            for i in range(1, num_cols):  # Commencer à 1 pour ignorer la colonne A (date)
+                if i not in percent_column_indices:  # Ignorer les colonnes de pourcentage
+                    number_column_indices.append(i)
+            
+            # Traiter par petits lots pour éviter les erreurs de quota
+            batch_size = 5
+            for i in range(0, len(number_column_indices), batch_size):
+                batch = number_column_indices[i:i+batch_size]
+                
+                for col_index in batch:
+                    col_letter = get_column_letter_safe(col_index)
+                    if col_letter:  # Seulement si la colonne existe
+                        safe_sheets_operation(sheet.format, f'{col_letter}:{col_letter}', {
+                            "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
+                        })
+                        time.sleep(0.2)
+                
+                # Petite pause entre les lots
+                if i + batch_size < len(number_column_indices):
+                    time.sleep(1)
+            
+            # 4. Formater les en-têtes
+            last_col = self._get_column_letter(len(headers) - 1)
             safe_sheets_operation(sheet.format, f'A1:{last_col}1', {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
             })
-            time.sleep(1)
+            time.sleep(0.5)
             
-            # Formater la colonne Date (A) comme DATE
-            safe_sheets_operation(sheet.format, 'A2:A2', {
-                "numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}
-            })
-            time.sleep(1)
-            
-            # Formater les colonnes de nombres entiers comme NUMBER (avec vérification des limites)
-            number_column_indices = [1, 2, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
-            
-            for col_index in number_column_indices:
-                if col_index < len(headers):  # Vérifier que l'index est dans les limites
-                    col_letter = self._get_column_letter(col_index)
-                    result = safe_sheets_operation(sheet.format, f'{col_letter}2:{col_letter}2', {
-                        "numberFormat": {"type": "NUMBER", "pattern": "#,##0"}
-                    })
-                    if result is None:  # L'opération a été ignorée à cause des limites
-                        print(f"   ⚠️ Formatage ignoré pour la colonne {col_letter} (limites dépassées)")
-                    time.sleep(0.3)
-            
-            # Formater les colonnes de pourcentages (D=3, L=11, M=12) comme PERCENT
-            percent_column_indices = [3, 11, 12]
-            for col_index in percent_column_indices:
-                if col_index < len(headers):  # Vérifier que l'index est dans les limites
-                    col_letter = self._get_column_letter(col_index)
-                    result = safe_sheets_operation(sheet.format, f'{col_letter}2:{col_letter}2', {
-                        "numberFormat": {"type": "PERCENT", "pattern": "0.00%"}
-                    })
-                    if result is None:  # L'opération a été ignorée à cause des limites
-                        print(f"   ⚠️ Formatage ignoré pour la colonne {col_letter} (limites dépassées)")
-                    time.sleep(0.3)
-            
-            # Ajouter une note explicative
+            # 5. Ajouter une note explicative
             try:
                 note_row = 4
                 note = [f"Note: Statistiques lifetime mises à jour le {stats['date']}. Une seule ligne de données car il s'agit de données cumulatives."]
@@ -593,15 +665,6 @@ class GoogleSheetsExporter:
         except Exception as e:
             print(f"   Erreur lors de la mise à jour de la feuille de statistiques: {e}")
             return None
-    
-    def _get_column_letter(self, col_idx):
-        """Convertit un indice de colonne (0-based) en lettre de colonne Excel"""
-        result = ""
-        col_idx = col_idx + 1  # Convertir de 0-based à 1-based
-        while col_idx > 0:
-            col_idx, remainder = divmod(col_idx - 1, 26)
-            result = chr(65 + remainder) + result
-        return result
     
     def add_share_statistics(self, stats):
         """Ajoute les statistiques de partage"""
@@ -633,10 +696,10 @@ def verify_token(access_token):
     headers = {
         "Authorization": f"Bearer {access_token}",
         "X-Restli-Protocol-Version": "2.0.0",
-        "LinkedIn-Version": "202312"
+        "LinkedIn-Version": "202505"
     }
     
-    url = "https://api.linkedin.com/v2/me"
+    url = "https://api.linkedin.com/rest/me"
     
     try:
         response = requests.get(url, headers=headers)
@@ -653,7 +716,12 @@ class MultiOrganizationShareTracker:
     
     def __init__(self, config_file='organizations_config.json'):
         """Initialise le tracker multi-organisations"""
-        self.config_file = config_file
+        # Support pour le fichier de configuration personnalisé
+        if 'ORGANIZATIONS_CONFIG_FILE' in os.environ:
+            self.config_file = os.environ['ORGANIZATIONS_CONFIG_FILE']
+        else:
+            self.config_file = config_file
+            
         self.organizations = self.load_organizations()
         self.access_token = os.getenv("LINKEDIN_ACCESS_TOKEN", "").strip("'")
         self.admin_email = os.getenv("GOOGLE_ADMIN_EMAIL", "byteberry.analytics@gmail.com")
@@ -866,22 +934,24 @@ class MultiOrganizationShareTracker:
             # Afficher un aperçu des données
             print("\n📈 Aperçu des statistiques:")
             print(f"   Date de mesure: {stats['date']}")
-            print(f"   Impressions totales: {stats['impressions']['total']}")
+            print(f"   Affichages totaux: {stats['affichages']['total']}")
             print(f"   Taux d'engagement: {stats['engagement']['rate']:.2%}")
             print(f"   Total interactions: {stats['engagement']['total_interactions']}")
             
             # Chemin vers les credentials
-            credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
-            
-            # Pour Google Cloud Run, utiliser le chemin monté
-            if os.getenv('K_SERVICE'):  # Variable d'environnement de Cloud Run
-                credentials_path = Path('/app/credentials/service_account_credentials.json')
+            # Déterminer le chemin des credentials selon l'environnement
+            if os.getenv('K_SERVICE'):  # Cloud Run/Functions
+                credentials_path = Path('/tmp/credentials/service_account_credentials.json')
+            else:  # Local
+                credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
             
             if not credentials_path.exists():
                 # Essayer de créer les credentials depuis une variable d'environnement
                 creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
                 if creds_json:
-                    credentials_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Créer le dossier seulement si on n'est pas dans /app
+                    if not str(credentials_path).startswith('/app'):
+                        credentials_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(credentials_path, 'w') as f:
                         f.write(creds_json)
                     print("   ✅ Credentials créés depuis la variable d'environnement")
@@ -914,7 +984,7 @@ class MultiOrganizationShareTracker:
 def main():
     """Fonction principale"""
     print("="*60)
-    print("LINKEDIN MULTI-ORGANISATION SHARE STATISTICS TRACKER")
+    print("LINKEDIN MULTI-ORGANISATION - SUIVI DES STATISTIQUES DE PARTAGE")
     print("="*60)
     print(f"Date d'exécution: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -946,7 +1016,11 @@ def main():
     if len(tracker.organizations) > 5:
         print(f"\n⚠️  Attention: {len(tracker.organizations)} organisations à traiter.")
         print("   Cela peut prendre du temps et consommer des quotas API.")
-        response = input("   Continuer ? (o/N): ")
+        if os.getenv('AUTOMATED_MODE', 'false').lower() == 'true':
+            response = 'o'
+            print('🤖 Mode automatisé: réponse automatique \'o\'')
+        else:
+            response = input("   Continuer ? (o/N): ")
         if response.lower() != 'o':
             print("Annulé.")
             sys.exit(0)

@@ -24,6 +24,38 @@ from oauth2client.service_account import ServiceAccountCredentials
 # Chargement des variables d'environnement
 load_dotenv()
 
+# AJOUTEZ LA FONCTION ICI
+def ensure_percentage_as_decimal(value):
+    """
+    Convertit une valeur en décimal pour Google Sheets PERCENT
+    
+    Args:
+        value: La valeur à convertir (peut être 5 pour 5% ou 0.05 pour 5%)
+    
+    Returns:
+        float: Valeur en décimal (0.05 pour 5%)
+    """
+    if value is None:
+        return 0.0
+    
+    if isinstance(value, str):
+        # Enlever le symbole % si présent
+        value = value.replace('%', '').strip()
+        try:
+            value = float(value)
+        except:
+            return 0.0
+    
+    if isinstance(value, (int, float)):
+        # Si la valeur est > 1, on assume que c'est un pourcentage
+        if value > 1:
+            return float(value / 100)
+        else:
+            return float(value)
+    
+    return 0.0
+
+
 def get_column_letter(col_idx):
     """Convertit un indice de colonne (0-based) en lettre de colonne pour Google Sheets"""
     result = ""
@@ -686,17 +718,20 @@ class GoogleSheetsExporter:
             if date in merged_stats:
                 # Mettre à jour une entrée existante
                 merged_stats[date]['click_count'] = stat['click_count']
-                merged_stats[date]['engagement'] = stat['engagement']
+                
+                # CORRECTION ICI - Utiliser ensure_percentage_as_decimal
+                merged_stats[date]['engagement'] = ensure_percentage_as_decimal(stat['engagement'])
+                
                 merged_stats[date]['like_count'] = stat['like_count']
                 merged_stats[date]['comment_count'] = stat['comment_count']
                 merged_stats[date]['share_count'] = stat['share_count']
                 merged_stats[date]['impression_count'] = stat['impression_count']
                 merged_stats[date]['unique_impressions_count'] = stat['unique_impressions_count']
-                # Ajout des nouveaux champs
                 merged_stats[date]['share_mentions_count'] = stat.get('share_mentions_count', 0)
                 merged_stats[date]['comment_mentions_count'] = stat.get('comment_mentions_count', 0)
             else:
                 # Créer une nouvelle entrée (avec des vues et followers à 0)
+                engagement_value = ensure_percentage_as_decimal(stat['engagement'])
                 new_entry = {
                     'date': date,
                     'total_views': 0,
@@ -732,7 +767,7 @@ class GoogleSheetsExporter:
                     'paid_follower_gain': 0,
                     'total_follower_gain': 0,
                     'click_count': stat['click_count'],
-                    'engagement': stat['engagement'],
+                    'engagement': engagement_value,
                     'like_count': stat['like_count'],
                     'comment_count': stat['comment_count'],
                     'share_count': stat['share_count'],
@@ -749,15 +784,13 @@ class GoogleSheetsExporter:
         
         return merged_list
     
+    # Modifier la fonction format_columns_optimized
     def format_columns_optimized(self, sheet, headers):
         """Applique le formatage optimisé avec moins de requêtes API"""
         try:
             print("   🎨 Application du formatage optimisé des colonnes...")
             
-            # 1. Formatage global en une seule requête pour toutes les colonnes de données
-            last_col = get_column_letter(len(headers) - 1)
-            
-            # Formatage de la colonne date (A)
+            # 1. Formatage de la colonne date (A)
             try:
                 self.api_request_with_retry(
                     sheet.format, 
@@ -773,50 +806,61 @@ class GoogleSheetsExporter:
             except Exception as e:
                 print(f"   ⚠️  Impossible de formater la colonne date: {e}")
             
-            # Formatage numérique pour toutes les colonnes de données sauf la colonne engagement
+            # 2. Identifier la colonne du taux d'engagement
+            engagement_col_index = None
             try:
-                engagement_col_index = None
-                try:
-                    engagement_col_index = headers.index("Taux d'engagement (engagement)")
-                except ValueError:
-                    pass
+                # Trouver l'index de la colonne "Taux d'engagement"
+                for i, header in enumerate(headers):
+                    if "Taux d'engagement" in header or "engagement" in header:
+                        engagement_col_index = i
+                        break
                 
-                # Formater toutes les colonnes numériques en une fois
-                numeric_range = f"B:{last_col}"
+                if engagement_col_index is not None:
+                    engagement_col_letter = get_column_letter(engagement_col_index)
+                
                 self.api_request_with_retry(
                     sheet.format, 
-                    numeric_range, 
+                    f"{engagement_col_letter}:{engagement_col_letter}", 
                     {
                         "numberFormat": {
-                            "type": "NUMBER",
-                            "pattern": "#,##0"
+                            "type": "PERCENT",
+                            "pattern": "0.00%"
                         }
                     }
                 )
-                print("   ✅ Formatage numérique global appliqué")
+                print(f"   ✅ Formatage pourcentage appliqué à la colonne {engagement_col_letter}")
+            except Exception as e:
+                print(f"   ⚠️  Impossible de formater la colonne engagement: {e}")
+            
+            # 3. Formater toutes les autres colonnes numériques
+            try:
+                # Toutes les colonnes sauf A (date) et le taux d'engagement
+                last_col = get_column_letter(len(headers) - 1)
                 
-                # Formatage spécial pour la colonne engagement si elle existe
-                if engagement_col_index is not None:
-                    engagement_col_letter = get_column_letter(engagement_col_index)
-                    try:
-                        self.api_request_with_retry(
-                            sheet.format, 
-                            f"{engagement_col_letter}:{engagement_col_letter}", 
-                            {
-                                "numberFormat": {
-                                    "type": "PERCENT",
-                                    "pattern": "0.00%"
+                # Formater toutes les colonnes numériques
+                for i in range(1, len(headers)):
+                    if i != engagement_col_index:  # Skip engagement column
+                        col_letter = get_column_letter(i)
+                        try:
+                            self.api_request_with_retry(
+                                sheet.format, 
+                                f"{col_letter}:{col_letter}", 
+                                {
+                                    "numberFormat": {
+                                        "type": "NUMBER",
+                                        "pattern": "#,##0"
+                                    }
                                 }
-                            }
-                        )
-                        print(f"   ✅ Formatage pourcentage appliqué à la colonne {engagement_col_letter}")
-                    except Exception as e:
-                        print(f"   ⚠️  Impossible de formater la colonne engagement: {e}")
-                        
+                            )
+                        except:
+                            pass
+                
+                print("   ✅ Formatage numérique appliqué")
+                    
             except Exception as e:
                 print(f"   ⚠️  Impossible d'appliquer le formatage numérique global: {e}")
             
-            # 2. Formatage des en-têtes
+            # 4. Formatage des en-têtes
             try:
                 header_range = f'A1:{last_col}1'
                 self.api_request_with_retry(
@@ -835,16 +879,57 @@ class GoogleSheetsExporter:
                 
         except Exception as e:
             print(f"   ❌ Erreur lors du formatage optimisé des colonnes: {e}")
-    
-    def update_daily_stats_sheet(self, combined_stats, org_id):
-        """Met à jour la feuille des statistiques quotidiennes avec gestion optimisée des quotas API"""
-        try:
-            # Détecter si on est en mode automatisé
-            if self.is_automated:
-                print("   🤖 Mode automatisé détecté - Force la mise à jour des données récentes")
             
-            # Charger l'état de progression antérieur si disponible
-            processed_dates = self.load_progress(org_id)
+    def update_daily_stats_sheet(self, combined_stats, org_id):
+        """Met à jour la feuille des statistiques quotidiennes avec vérification et mise à jour intelligente"""
+        try:
+            print("   🔄 Mode mise à jour intelligente activé")
+            
+            # Headers attendus
+            expected_headers = [
+                "Date",
+                "Vues totales page",
+                "Vues uniques page",
+                "Vues Desktop",
+                "Vues Desktop uniques",
+                "Vues Mobile",
+                "Vues Mobile uniques",
+                "Nbre de vues Accueil",
+                "Vues Accueil uniques",
+                "Vues Accueil Desktop",
+                "Vues Accueil Mobile",
+                "Nbre de vues À propos",
+                "Vues À propos uniques",
+                "Nbre de vues Personnes",
+                "Vues Personnes uniques",
+                "Nbre de vues Emplois",
+                "Vues Emplois uniques",
+                "Vues Emplois Desktop",
+                "Vues Emplois Mobile",
+                "Vues Carrières",
+                "Vues Carrières uniques",
+                "Vues Carrières Desktop",
+                "Vues Carrières Mobile",
+                "Vues Vie en entreprise",
+                "Vues Vie en entreprise uniques",
+                "Vues Vie en entreprise Desktop",
+                "Vues Vie en entreprise Mobile",
+                "Clics sur boutons Desktop",
+                "Clics sur boutons Mobile",
+                "Nbre clics sur boutons",
+                "Nouveaux abonnés organiques",
+                "Nouveaux abonnés payants",
+                "Nouveaux abonnés",
+                "Nbre de clics",
+                "Taux d'engagement de la page",
+                "Nbre de réactions",
+                "Nbre de commentaires",
+                "Nbre de partages",
+                "Nbre de mentions partage",
+                "Nbre de mentions commentaires",
+                "Nbre d'affichages",
+                "Nbre d'affichages uniques"
+            ]
             
             # Vérifier si la feuille existe ou la créer
             try:
@@ -860,348 +945,287 @@ class GoogleSheetsExporter:
                         self.spreadsheet.add_worksheet, 
                         title="Statistiques quotidiennes", 
                         rows=500, 
-                        cols=50  # Augmentation du nombre de colonnes pour les nouvelles métriques
+                        cols=50
                     )
                     print("   📊 Nouvelle feuille 'Statistiques quotidiennes' créée")
             
-            # Récupérer les données existantes avec des retries si nécessaire
+            # Récupérer les données existantes
             existing_data = self.api_request_with_retry(sheet.get_all_values)
-            has_headers = len(existing_data) > 0
+            headers_need_update = False
+            last_existing_date = None
+            existing_dates = set()
             
-            # Créer les en-têtes si nécessaire
-            headers = [
-                "Date",
+            # Vérifier si des données existent
+            if len(existing_data) > 0:
+                # Vérifier les headers
+                current_headers = existing_data[0] if existing_data[0] else []
                 
-                # --- Vues de page ---
-                # Vues générales
-                "Vues totales (allPageViews)", 
-                "Vues uniques (uniquePageViews)", 
-                
-                # Vues par appareil
-                "Vues Desktop (allDesktopPageViews)", 
-                "Vues Desktop uniques (uniqueDesktopPageViews)", 
-                "Vues Mobile (allMobilePageViews)",
-                "Vues Mobile uniques (uniqueMobilePageViews)",
-                
-                # Vues par section - Aperçu
-                "Vues Accueil (overviewPageViews)", 
-                "Vues Accueil uniques (uniqueOverviewPageViews)",
-                "Vues Accueil Desktop (desktopOverviewPageViews)",
-                "Vues Accueil Mobile (mobileOverviewPageViews)",
-                
-                # Vues par section - À propos
-                "Vues À propos (aboutPageViews)", 
-                "Vues À propos uniques (uniqueAboutPageViews)",
-                
-                # Vues par section - Personnes
-                "Vues Personnes (peoplePageViews)", 
-                "Vues Personnes uniques (uniquePeoplePageViews)",
-                
-                # Vues par section - Emplois
-                "Vues Emplois (jobsPageViews)", 
-                "Vues Emplois uniques (uniqueJobsPageViews)",
-                "Vues Emplois Desktop (desktopJobsPageViews)",
-                "Vues Emplois Mobile (mobileJobsPageViews)",
-                
-                # Vues par section - Carrières
-                "Vues Carrières (careersPageViews)", 
-                "Vues Carrières uniques (uniqueCareersPageViews)",
-                "Vues Carrières Desktop (desktopCareersPageViews)",
-                "Vues Carrières Mobile (mobileCareersPageViews)",
-                
-                # Vues par section - Vie en entreprise
-                "Vues Vie en entreprise (lifeAtPageViews)",
-                "Vues Vie en entreprise uniques (uniqueLifeAtPageViews)",
-                "Vues Vie en entreprise Desktop (desktopLifeAtPageViews)",
-                "Vues Vie en entreprise Mobile (mobileLifeAtPageViews)",
-                
-                # Clics sur boutons
-                "Clics sur boutons Desktop (desktopCustomButtonClickCounts)",
-                "Clics sur boutons Mobile (mobileCustomButtonClickCounts)",
-                "Total clics sur boutons",
-                
-                # --- Followers ---
-                "Nouveaux followers organiques (organicFollowerGain)",
-                "Nouveaux followers payants (paidFollowerGain)",
-                "Total nouveaux followers (totalFollowerGain)",
-                
-                # --- Partages ---
-                "Nombre de clics (clickCount)",
-                "Taux d'engagement (engagement)",
-                "Nombre de J'aime (likeCount)",
-                "Nombre de commentaires (commentCount)",
-                "Nombre de partages (shareCount)",
-                "Mentions dans partages (shareMentionsCount)",
-                "Mentions dans commentaires (commentMentionsCount)",
-                "Nombre d'impressions (impressionCount)",
-                "Nombre d'impressions uniques (uniqueImpressionsCount)"
-            ]
-            
-            # S'assurer que la première ligne contient les en-têtes
-            if not has_headers or len(existing_data) == 0 or len(existing_data[0]) == 0 or existing_data[0][0] == '':
-                print("   📝 Ajout des en-têtes en première ligne")
-                # Ajouter les en-têtes en une seule opération avec retry
-                self.api_request_with_retry(sheet.update, 'A1', [headers])
-                
-                # Appliquer le formatage des en-têtes
-                self.format_columns_optimized(sheet, headers)
-                
-                # Pour le cas où les en-têtes viennent d'être ajoutés
-                existing_data = self.api_request_with_retry(sheet.get_all_values)
-                if len(existing_data) <= 1:
-                    existing_dates = []
-                    existing_dates_dict = {}
+                # Comparer les headers
+                if current_headers != expected_headers:
+                    print("   ⚠️  Headers incorrects détectés, mise à jour nécessaire")
+                    headers_need_update = True
                 else:
-                    existing_dates = [row[0] for row in existing_data[1:]]
-                    existing_dates_dict = {row[0]: idx + 2 for idx, row in enumerate(existing_data[1:])}
+                    print("   ✅ Headers corrects")
+                
+                # Récupérer les dates existantes si on a des données
+                if len(existing_data) > 1:
+                    for row in existing_data[1:]:
+                        if row and row[0]:  # Si la ligne existe et a une date
+                            existing_dates.add(row[0])
+                    
+                    # Trouver la dernière date
+                    if existing_dates:
+                        sorted_dates = sorted(list(existing_dates))
+                        last_existing_date = sorted_dates[-1]
+                        print(f"   📅 Dernière date dans le sheet: {last_existing_date}")
             else:
-                # Récupérer les dates existantes (colonne A) avec leur position
-                if len(existing_data) > 1:  # Si des données existent au-delà des en-têtes
-                    existing_dates = [row[0] for row in existing_data[1:]]
-                    # Créer un dictionnaire date -> numéro de ligne
-                    existing_dates_dict = {row[0]: idx + 2 for idx, row in enumerate(existing_data[1:])}
-                else:
-                    existing_dates = []
-                    existing_dates_dict = {}
-                    
-                # Vérifier si les en-têtes correspondent à ce qu'on attend
-                if len(existing_data[0]) < len(headers):
-                    print("   📝 Mise à jour des en-têtes pour correspondre au format attendu")
-                    self.api_request_with_retry(sheet.update, values=[headers], range_name='A1')
-                    
-                    # Appliquer le formatage optimisé
-                    self.format_columns_optimized(sheet, headers)
+                print("   📝 Feuille vide, ajout des headers nécessaire")
+                headers_need_update = True
             
-            # Obtenir la date d'aujourd'hui et d'hier
-            today = datetime.now().strftime('%Y-%m-%d')
-            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            # Mettre à jour les headers si nécessaire
+            if headers_need_update:
+                print("   🔄 Mise à jour des headers...")
+                self.api_request_with_retry(sheet.update, values=[expected_headers], range_name='A1')
+                print("   ✅ Headers mis à jour")
             
-            print(f"   📅 Date du jour: {today}")
-            print(f"   📅 Date d'hier: {yesterday}")
+            # Vérifier et appliquer le formatage des colonnes
+            print("   🎨 Vérification du formatage des colonnes...")
+            self.verify_and_apply_formatting(sheet, expected_headers)
             
-            # Créer un dictionnaire des dates des nouvelles données
+            # Déterminer les dates à traiter
+            dates_to_update = []
+            new_dates = []
+            
+            # Créer un dictionnaire des nouvelles données par date
             new_data_dict = {stat['date']: stat for stat in combined_stats}
             
-            # Préparer les mises à jour en lots
-            updates_by_date = {}
-            new_rows = []
-            
-            # Identifier les dates à traiter
-            dates_to_process = set()
-            
-            # En mode automatisé, forcer la mise à jour des 7 derniers jours
-            if self.is_automated:
-                print("   🔄 Mode automatisé: Force la mise à jour des 7 derniers jours")
-                for i in range(7):
-                    date_to_update = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-                    if date_to_update in new_data_dict:
-                        dates_to_process.add(date_to_update)
-                        print(f"   📅 Ajout forcé: {date_to_update}")
+            # Si on a une dernière date existante
+            if last_existing_date:
+                # La dernière date doit être mise à jour (données partielles possibles)
+                if last_existing_date in new_data_dict:
+                    dates_to_update.append(last_existing_date)
+                    print(f"   🔄 Mise à jour de la dernière date: {last_existing_date}")
+                
+                # Ajouter toutes les dates après la dernière date existante
+                for date in sorted(new_data_dict.keys()):
+                    if date > last_existing_date:
+                        new_dates.append(date)
+                
+                if new_dates:
+                    print(f"   ➕ {len(new_dates)} nouvelles dates à ajouter")
             else:
-                # Mode manuel : comportement existant
-                # 1. Toujours traiter aujourd'hui et hier s'ils sont dans les données
-                if today in new_data_dict:
-                    dates_to_process.add(today)
-                if yesterday in new_data_dict:
-                    dates_to_process.add(yesterday)
+                # Si aucune donnée existante, toutes les dates sont nouvelles
+                new_dates = sorted(new_data_dict.keys())
+                print(f"   ➕ Ajout de {len(new_dates)} dates (historique complet)")
             
-            # 2. Ajouter les dates qui n'existent pas encore dans le sheet
-            for date in new_data_dict:
-                if date not in existing_dates_dict:
-                    dates_to_process.add(date)
+            # Mettre à jour la dernière date existante
+            if dates_to_update:
+                # Trouver la ligne de la dernière date
+                for idx, row in enumerate(existing_data[1:], start=2):
+                    if row and row[0] == last_existing_date:
+                        # Préparer les données pour cette date
+                        day_stats = new_data_dict[last_existing_date]
+                        row_data = self.prepare_row_data(day_stats)
+                        
+                        # Mettre à jour cette ligne
+                        last_col = get_column_letter(len(expected_headers) - 1)
+                        range_name = f'A{idx}:{last_col}{idx}'
+                        self.api_request_with_retry(sheet.update, values=[row_data], range_name=range_name)
+                        print(f"   ✅ Mise à jour effectuée pour {last_existing_date} (ligne {idx})")
+                        break
             
-            print(f"   📊 Dates à traiter: {len(dates_to_process)} sur {len(new_data_dict)}")
-            
-            # Log détaillé en mode automatisé
-            if self.is_automated and len(dates_to_process) < 20:
-                print(f"   📋 Dates forcées: {sorted(list(dates_to_process), reverse=True)}")
-            
-            # Traiter uniquement les dates identifiées
-            for date in dates_to_process:
-                if date not in new_data_dict:
-                    continue
-                    
-                day_stats = new_data_dict[date]
+            # Ajouter les nouvelles dates
+            if new_dates:
+                print(f"   📊 Ajout de {len(new_dates)} nouvelles lignes...")
                 
-                # Préparation des données de ligne
-                row_data = [
-                    date,
-                    
-                    # Vues générales
-                    day_stats['total_views'],
-                    day_stats['unique_views'],
-                    
-                    # Vues par appareil
-                    day_stats['desktop_views'],
-                    day_stats['unique_desktop_views'],
-                    day_stats['mobile_views'],
-                    day_stats['unique_mobile_views'],
-                    
-                    # Vues par section - Aperçu
-                    day_stats['overview_views'],
-                    day_stats['unique_overview_views'],
-                    day_stats['desktop_overview_views'],
-                    day_stats['mobile_overview_views'],
-                    
-                    # Vues par section - À propos
-                    day_stats['about_views'],
-                    day_stats['unique_about_views'],
-                    
-                    # Vues par section - Personnes
-                    day_stats['people_views'],
-                    day_stats['unique_people_views'],
-                    
-                    # Vues par section - Emplois
-                    day_stats['jobs_views'],
-                    day_stats['unique_jobs_views'],
-                    day_stats['desktop_jobs_views'],
-                    day_stats['mobile_jobs_views'],
-                    
-                    # Vues par section - Carrières
-                    day_stats['careers_views'],
-                    day_stats['unique_careers_views'],
-                    day_stats['desktop_careers_views'],
-                    day_stats['mobile_careers_views'],
-                    
-                    # Vues par section - Vie en entreprise
-                    day_stats['life_at_views'],
-                    day_stats['unique_life_at_views'],
-                    day_stats['desktop_life_at_views'],
-                    day_stats['mobile_life_at_views'],
-                    
-                    # Clics sur boutons
-                    day_stats['desktop_button_clicks'],
-                    day_stats['mobile_button_clicks'],
-                    day_stats['total_button_clicks'],
-                    
-                    # Followers
-                    day_stats['organic_follower_gain'],
-                    day_stats['paid_follower_gain'],
-                    day_stats['total_follower_gain'],
-                    
-                    # Partages
-                    day_stats['click_count'],
-                    day_stats['engagement'],
-                    day_stats['like_count'],
-                    day_stats['comment_count'],
-                    day_stats['share_count'],
-                    day_stats.get('share_mentions_count', 0),
-                    day_stats.get('comment_mentions_count', 0),
-                    day_stats['impression_count'],
-                    day_stats['unique_impressions_count']
-                ]
+                # Préparer toutes les nouvelles lignes
+                new_rows = []
+                for date in sorted(new_dates):
+                    if date in new_data_dict:
+                        day_stats = new_data_dict[date]
+                        row_data = self.prepare_row_data(day_stats)
+                        new_rows.append(row_data)
                 
-                # Vérifier si cette date existe déjà
-                if date in existing_dates_dict:
-                    # En mode automatisé, toujours mettre à jour
-                    # En mode manuel, mettre à jour uniquement les 3 derniers jours
-                    recent_dates = [(datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(3)]
-                    if self.is_automated or date in recent_dates:
-                        row_index = existing_dates_dict[date]
-                        updates_by_date[row_index] = row_data
-                        print(f"   🔄 {'[AUTO]' if self.is_automated else '[MANUAL]'} Mise à jour: {date}")
+                # Déterminer où commencer l'ajout
+                if len(existing_data) > 0:
+                    start_row = len(existing_data) + 1
                 else:
-                    # Nouvelle date à ajouter
-                    new_rows.append(row_data)
-                    print(f"   ➕ Nouvelle date: {date}")
-            
-            # 1. Ajouter de nouvelles lignes en lots avec délais plus longs
-            if new_rows:
-                print(f"   📊 Ajout de {len(new_rows)} nouvelles dates")
-                # Trier les nouvelles lignes par date avant de les ajouter
-                new_rows.sort(key=lambda x: x[0])
+                    start_row = 2  # Après les headers
                 
-                # Réduire à des lots plus petits pour éviter les quotas
-                batch_size = 8  # Réduction de la taille des lots
+                # Ajouter par lots
+                batch_size = 50
                 for i in range(0, len(new_rows), batch_size):
                     batch = new_rows[i:i+batch_size]
-                    # S'assurer d'avoir au moins une ligne d'en-tête avant d'ajouter
-                    first_empty_row = len(existing_data) + 1
-                    if first_empty_row == 1:  # Si aucune donnée n'existe encore
-                        first_empty_row = 2  # Commencer à la ligne 2 (après les en-têtes)
+                    current_start_row = start_row + i
+                    last_col = get_column_letter(len(expected_headers) - 1)
+                    range_name = f'A{current_start_row}:{last_col}{current_start_row + len(batch) - 1}'
                     
-                    try:
-                        # Calculer le range pour l'ajout
-                        last_col = get_column_letter(len(headers) - 1)
-                        range_name = f'A{first_empty_row}:{last_col}{first_empty_row + len(batch) - 1}'
-                        self.api_request_with_retry(sheet.update, range_name, batch)
-                        
-                        # Mettre à jour les variables pour la prochaine itération
-                        existing_data.extend(batch)
-                        
-                        print(f"   ✅ Lot {i//batch_size + 1}/{(len(new_rows)-1)//batch_size + 1} ajouté ({len(batch)} lignes)")
-                        
-                        # Ajouter les dates traitées à la liste de progression
-                        for row in batch:
-                            processed_dates.add(row[0])  # Ajouter la date (première colonne)
-                        
-                        # Sauvegarder la progression régulièrement
-                        if i % (batch_size * 2) == 0:
-                            self.save_progress(processed_dates, org_id)
-                        
-                        # Attendre plus longtemps entre les lots pour éviter les quotas
-                        time.sleep(8)  # Augmentation du délai
-                    except Exception as e:
-                        print(f"   ❌ Erreur lors de l'ajout du lot {i//batch_size + 1}: {e}")
-                        # Sauvegarder l'état actuel avant de continuer
-                        self.save_progress(processed_dates, org_id)
-                        # Continue avec le lot suivant
-                        continue
+                    self.api_request_with_retry(sheet.update, values=batch, range_name=range_name)
+                    print(f"   ✅ Lot {i//batch_size + 1}/{(len(new_rows)-1)//batch_size + 1} ajouté")
+                    
+                    if i + batch_size < len(new_rows):
+                        time.sleep(3)
             
-            # 2. Mettre à jour les lignes existantes
-            if updates_by_date:
-                print(f"   🔄 Mise à jour de {len(updates_by_date)} dates")
-                # Pour éviter les timeouts, on met à jour ligne par ligne avec pauses plus longues
-                for row_idx, row_data in updates_by_date.items():
-                    try:
-                        last_col = get_column_letter(len(headers) - 1)
-                        range_name = f'A{row_idx}:{last_col}{row_idx}'
-                        self.api_request_with_retry(sheet.update, range_name, [row_data])
-                        processed_dates.add(row_data[0])  # Ajouter la date
-                        print(f"   ✅ Mise à jour effectuée pour {row_data[0]} (ligne {row_idx})")
-                        time.sleep(3)  # Pause plus longue entre chaque mise à jour
-                    except Exception as e:
-                        print(f"   ❌ Erreur lors de la mise à jour de la ligne {row_idx}: {e}")
-                        self.save_progress(processed_dates, org_id)
-                        continue
-            
-            # 3. Tri des données - TOUJOURS actif pour le multi-organisation
-            print("   🔄 Tri des données par date (du plus ancien au plus récent)...")
+            # Trier les données par date
+            print("   🔄 Tri des données par date...")
             try:
-                # Récupérer toutes les données actualisées
+                # Récupérer le nombre total de lignes
                 updated_data = self.api_request_with_retry(sheet.get_all_values)
                 if len(updated_data) > 1:
-                    # Exclure la ligne d'en-tête pour le tri
-                    last_col = get_column_letter(len(headers) - 1)
+                    last_col = get_column_letter(len(expected_headers) - 1)
                     data_range = f'A2:{last_col}{len(updated_data)}'
-                    try:
-                        self.api_request_with_retry(sheet.sort, (1, 'asc'), range=data_range)
-                        print("   ✅ Tri terminé")
-                    except Exception as e:
-                        print(f"   ⚠️  Impossible de trier les données: {e}")
-                        print("   Le tri sera ignoré pour cette exécution")
+                    self.api_request_with_retry(sheet.sort, (1, 'asc'), range=data_range)
+                    print("   ✅ Tri terminé")
             except Exception as e:
-                print(f"   ⚠️  Erreur lors du tri des données: {e}")
-            
-            # Sauvegarder la progression finale
-            self.save_progress(processed_dates, org_id)
+                print(f"   ⚠️  Impossible de trier les données: {e}")
             
             # Résumé
-            print(f"\n   📊 Résumé des modifications:")
-            print(f"   - Nouvelles lignes ajoutées: {len(new_rows)}")
-            print(f"   - Lignes mises à jour: {len(updates_by_date)}")
-            print(f"   - Lignes ignorées (déjà à jour): {len(combined_stats) - len(dates_to_process)}")
+            print(f"\n   📊 Résumé de la mise à jour:")
+            if dates_to_update:
+                print(f"   - Date mise à jour: {dates_to_update[0]}")
+            print(f"   - Nouvelles dates ajoutées: {len(new_dates)}")
+            if new_dates:
+                print(f"   - Période ajoutée: du {new_dates[0]} au {new_dates[-1]}")
             
-            # Supprimer le fichier de progression si tout s'est bien passé
-            progress_file = f'linkedin_stats_progress_{org_id}.json'
-            if os.path.exists(progress_file):
-                os.remove(progress_file)
-                print("   🗑️  Fichier de progression supprimé (traitement terminé avec succès)")
-                
             return sheet
+            
         except Exception as e:
-            print(f"   ❌ Erreur lors de la mise à jour de la feuille des statistiques quotidiennes: {e}")
+            print(f"   ❌ Erreur lors de la mise à jour de la feuille: {e}")
             return None
+    
+    def prepare_row_data(self, day_stats):
+        """Prépare une ligne de données à partir des statistiques du jour"""
+        return [
+            day_stats['date'],
+            day_stats['total_views'],
+            day_stats['unique_views'],
+            day_stats['desktop_views'],
+            day_stats['unique_desktop_views'],
+            day_stats['mobile_views'],
+            day_stats['unique_mobile_views'],
+            day_stats['overview_views'],
+            day_stats['unique_overview_views'],
+            day_stats['desktop_overview_views'],
+            day_stats['mobile_overview_views'],
+            day_stats['about_views'],
+            day_stats['unique_about_views'],
+            day_stats['people_views'],
+            day_stats['unique_people_views'],
+            day_stats['jobs_views'],
+            day_stats['unique_jobs_views'],
+            day_stats['desktop_jobs_views'],
+            day_stats['mobile_jobs_views'],
+            day_stats['careers_views'],
+            day_stats['unique_careers_views'],
+            day_stats['desktop_careers_views'],
+            day_stats['mobile_careers_views'],
+            day_stats['life_at_views'],
+            day_stats['unique_life_at_views'],
+            day_stats['desktop_life_at_views'],
+            day_stats['mobile_life_at_views'],
+            day_stats['desktop_button_clicks'],
+            day_stats['mobile_button_clicks'],
+            day_stats['total_button_clicks'],
+            day_stats['organic_follower_gain'],
+            day_stats['paid_follower_gain'],
+            day_stats['total_follower_gain'],
+            day_stats['click_count'],
+            day_stats['engagement'],
+            day_stats['like_count'],
+            day_stats['comment_count'],
+            day_stats['share_count'],
+            day_stats.get('share_mentions_count', 0),
+            day_stats.get('comment_mentions_count', 0),
+            day_stats['impression_count'],
+            day_stats['unique_impressions_count']
+        ]
+    
+    def verify_and_apply_formatting(self, sheet, headers):
+        """Vérifie et applique le formatage correct aux colonnes"""
+        try:
+            print("   🔍 Vérification et application du formatage...")
+            
+            # 1. Formatage de la colonne date (A)
+            try:
+                self.api_request_with_retry(
+                    sheet.format, 
+                    "A:A", 
+                    {
+                        "numberFormat": {
+                            "type": "DATE",
+                            "pattern": "yyyy-mm-dd"
+                        }
+                    }
+                )
+                print("   ✅ Formatage date appliqué/vérifié")
+            except Exception as e:
+                print(f"   ⚠️  Impossible de formater la colonne date: {e}")
+            
+            # 2. Trouver et formater la colonne taux d'engagement
+            engagement_col_index = None
+            for i, header in enumerate(headers):
+                if "Taux d'engagement de la page" in header:
+                    engagement_col_index = i
+                    break
+            
+            if engagement_col_index is not None:
+                engagement_col_letter = get_column_letter(engagement_col_index)
+                try:
+                    self.api_request_with_retry(
+                        sheet.format, 
+                        f"{engagement_col_letter}:{engagement_col_letter}", 
+                        {
+                            "numberFormat": {
+                                "type": "PERCENT",
+                                "pattern": "0.00%"
+                            }
+                        }
+                    )
+                    print(f"   ✅ Formatage pourcentage appliqué/vérifié (colonne {engagement_col_letter})")
+                except Exception as e:
+                    print(f"   ⚠️  Impossible de formater la colonne engagement: {e}")
+            
+            # 3. Formater toutes les autres colonnes numériques
+            for i in range(1, len(headers)):
+                if i != engagement_col_index:  # Skip engagement column
+                    col_letter = get_column_letter(i)
+                    try:
+                        self.api_request_with_retry(
+                            sheet.format, 
+                            f"{col_letter}:{col_letter}", 
+                            {
+                                "numberFormat": {
+                                    "type": "NUMBER",
+                                    "pattern": "#,##0"
+                                }
+                            },
+                            max_retries=2,  # Moins de retries pour le formatage
+                            initial_delay=1
+                        )
+                    except:
+                        # Silencieusement ignorer les erreurs de formatage pour les colonnes individuelles
+                        pass
+            
+            print("   ✅ Formatage numérique appliqué/vérifié")
+            
+            # 4. Formatage des en-têtes
+            try:
+                last_col = get_column_letter(len(headers) - 1)
+                header_range = f'A1:{last_col}1'
+                self.api_request_with_retry(
+                    sheet.format, 
+                    header_range, 
+                    {
+                        "textFormat": {"bold": True},
+                        "backgroundColor": {"red": 0.9, "green": 0.9, "blue": 0.9}
+                    }
+                )
+                print("   ✅ Formatage des en-têtes appliqué/vérifié")
+            except Exception as e:
+                print(f"   ⚠️  Impossible de formater les en-têtes: {e}")
+                
+        except Exception as e:
+            print(f"   ⚠️  Erreur lors de la vérification du formatage: {e}")
     
     def add_combined_statistics(self, page_stats, follower_stats, share_stats, org_id):
         """Ajoute les statistiques quotidiennes combinées (pages, followers et partages)"""
@@ -1347,12 +1371,8 @@ class MultiOrganizationTracker:
             return False
         
         # Afficher le mode d'exécution
-        if self.is_automated:
-            print("\n🤖 === MODE AUTOMATISÉ ACTIVÉ ===")
-            print("Les 7 derniers jours seront forcément mis à jour pour chaque organisation")
-        else:
-            print("\n👤 === MODE MANUEL ===")
-            print("Seuls les 3 derniers jours seront mis à jour pour les dates existantes")
+        print("\n🔄 === MODE MISE À JOUR INTELLIGENTE ===")
+        print("Vérification des headers, formats et ajout des dates manquantes")
         
         # Vérifier le token une seule fois
         print("\n--- Vérification du token ---")
@@ -1522,22 +1542,19 @@ class MultiOrganizationTracker:
         # 4. Export vers Google Sheets
         print(f"\n4. Export vers Google Sheets...")
         
-        # Chemin vers les credentials
-        credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
-        
-        # Pour Google Cloud Run, utiliser le chemin monté
-        if os.getenv('K_SERVICE'):  # Variable d'environnement de Cloud Run
-            credentials_path = Path('/workspace/credentials/service_account_credentials.json')
-        
-        # Pour les environnements où les credentials sont dans /tmp
-        if not credentials_path.exists() and os.path.exists('/tmp/credentials/service_account_credentials.json'):
+        # Déterminer le chemin des credentials selon l'environnement
+        if os.getenv('K_SERVICE'):  # Cloud Run/Functions
             credentials_path = Path('/tmp/credentials/service_account_credentials.json')
+        else:  # Local
+            credentials_path = Path(__file__).resolve().parent / 'credentials' / 'service_account_credentials.json'
         
         if not credentials_path.exists():
             # Essayer de créer les credentials depuis une variable d'environnement
             creds_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
             if creds_json:
-                credentials_path.parent.mkdir(parents=True, exist_ok=True)
+                # Créer le dossier seulement si on n'est pas dans /app
+                if not str(credentials_path).startswith('/app'):
+                    credentials_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(credentials_path, 'w') as f:
                     f.write(creds_json)
                 print("   ✅ Credentials créés depuis la variable d'environnement")
@@ -1565,7 +1582,7 @@ def main():
     """Fonction principale"""
     print("="*60)
     print("LINKEDIN MULTI-ORGANISATION STATISTICS TRACKER")
-    print("Version améliorée avec mise à jour forcée pour automatisation")
+    print("Version avec mise à jour intelligente")
     print("="*60)
     print(f"Date d'exécution: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -1590,19 +1607,27 @@ def main():
     print(f"\n⚙️  Configuration:")
     print(f"   - Jours d'historique: {tracker.days_history}")
     print(f"   - Email admin: {tracker.admin_email}")
-    print(f"   - Mode: {'🤖 AUTOMATISÉ' if tracker.is_automated else '👤 MANUEL'}")
+    print(f"   - Mode: 🔄 MISE À JOUR INTELLIGENTE")
     
-    # En mode automatisé, pas de demande de confirmation
-    if not tracker.is_automated and len(tracker.organizations) > 3:
+    # Demander confirmation pour plusieurs organisations
+    if len(tracker.organizations) > 3:
         print(f"\n⚠️  Attention: {len(tracker.organizations)} organisations à traiter.")
-        print("   Cela peut prendre du temps et consommer des quotas API.")
+        print("   Le système va:")
+        print("   - Vérifier et corriger les headers si nécessaire")
+        print("   - Vérifier et appliquer le formatage correct")
+        print("   - Mettre à jour la dernière date (données partielles)")
+        print("   - Ajouter uniquement les dates manquantes")
         print("   Des pauses de 30 secondes seront appliquées entre chaque organisation.")
-        response = input("   Continuer ? (o/N): ")
+        if os.getenv('AUTOMATED_MODE', 'false').lower() == 'true':
+            response = 'o'
+            print('🤖 Mode automatisé: réponse automatique "o"')
+        else:
+            response = input("   Continuer ? (o/N): ")
         if response.lower() != 'o':
             print("Annulé.")
             sys.exit(0)
     
-    print("\n🚀 Démarrage du traitement avec gestion optimisée des quotas...")
+    print("\n🚀 Démarrage du traitement avec mise à jour intelligente...")
     
     # Lancer le traitement
     start_time = datetime.now()
