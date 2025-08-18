@@ -1,0 +1,42 @@
+{
+  "name": "WhatsTheData - Social Media Analytics",
+  "description": "Connectez vos pages LinkedIn et Facebook pour visualiser toutes vos m\u00e9triques",
+  "api_endpoints": {
+    "validate_token": "http://localhost:8000/api/v1/validate-token",
+    "get_data": "http://localhost:8000/api/v1/looker-data"
+  },
+  "authentication": "Bearer Token (API Key)",
+  "supported_platforms": [
+    "linkedin",
+    "facebook"
+  ],
+  "data_types": [
+    "page_metrics",
+    "post_metrics",
+    "overview"
+  ],
+  "fields_available": [
+    "platform",
+    "date",
+    "page_id",
+    "page_name",
+    "content_type",
+    "followers_total",
+    "followers_gained",
+    "followers_lost",
+    "impressions",
+    "unique_impressions",
+    "page_views",
+    "total_engagement",
+    "likes",
+    "comments",
+    "shares",
+    "clicks",
+    "engagement_rate",
+    "click_through_rate",
+    "reactions_positive",
+    "reactions_negative",
+    "video_views",
+    "video_complete_views"
+  ]
+}

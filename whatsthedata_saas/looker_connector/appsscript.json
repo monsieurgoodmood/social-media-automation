@@ -1,0 +1,34 @@
+{
+  "timeZone": "Europe/Paris",
+  "dependencies": {
+    "enabledAdvancedServices": [],
+    "libraries": []
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "dataStudio": {
+    "name": "WhatTheData - Analytics LinkedIn & Facebook",
+    "logoUrl": "https://your-domain.com/assets/whatsthedata-logo-64.png",
+    "company": "WhatTheData SAS",
+    "companyUrl": "https://whatsthedata.fr",
+    "addonUrl": "https://whatsthedata.fr/looker-studio-connector",
+    "supportUrl": "https://whatsthedata.fr/support",
+    "description": "Connecteur officiel WhatTheData pour analyser vos performances LinkedIn et Facebook directement dans Looker Studio. Synchronisation automatique des métriques, dashboards pré-configurés et insights en temps réel.",
+    "shortDescription": "Analytics automatisés LinkedIn & Facebook pour Looker Studio",
+    "sources": ["linkedin", "facebook", "social_media"],
+    "authType": ["USER_TOKEN"],
+    "feeType": ["PAID"],
+    "privacyPolicyUrl": "https://whatsthedata.fr/privacy-policy",
+    "termsOfServiceUrl": "https://whatsthedata.fr/terms-of-service",
+    "templates": {
+      "default": "1aBcDeFgHiJkLmNoPqRsTuVwXyZ"
+    }
+  },
+  "urlFetchWhitelist": [
+    "https://your-api-domain.com",
+    "https://api.whatsthedata.fr"
+  ],
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/script.external_request"
+  ]
+}
