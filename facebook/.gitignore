@@ -30,3 +30,4 @@ migrated_to_cloud.py
 facebook/configs
 facebook/.env
 configs/
+facebook/test_local.py
