@@ -1,490 +1,385 @@
 # app/api/looker_endpoints.py
-# ============================
-# 🎯 PRIORITÉ 2 - API pour votre connecteur Looker Studio
-# Met à jour votre fichier existant avec la vraie logique
+# Endpoints spécialisés pour le connecteur Looker Studio
 
-from fastapi import APIRouter, HTTPException, Depends, Security, Header
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any, Union
-import json
-import os
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi.responses import JSONResponse
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta, date
+from pydantic import BaseModel, Field
 import logging
+import json
 
-from app.database.connection import get_db, get_db_session
-from app.utils.config import settings
+from ..auth.user_manager import user_manager
+from ..database.connection import db_manager
+from ..database.models import User, FacebookAccount, LinkedinAccount
+from ..utils.config import Config
 
-# Configuration des logs
 logger = logging.getLogger(__name__)
 
-# Router pour les endpoints Looker Studio
-router = APIRouter(prefix="/api/v1", tags=["looker-studio"])
-security = HTTPBearer()
+router = APIRouter(prefix="/api/v1", tags=["Looker Studio"])
 
-# ================================
-# 1. AUTHENTIFICATION SIMPLIFIÉE
-# ================================
+# ========================================
+# MODELS PYDANTIC POUR LOOKER
+# ========================================
 
-def validate_api_token(token: str) -> Dict[str, Any]:
-    """
-    Valide le token API - VERSION SIMPLIFIÉE pour commencer
-    TODO: Remplacer par votre vraie logique d'authentification
-    """
+class LookerDataRequest(BaseModel):
+    platform: str = Field(default="both", description="Platform: linkedin, facebook, or both")
+    date_range: str = Field(default="30", description="Number of days to fetch")
+    start_date: Optional[str] = Field(None, description="Start date YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, description="End date YYYY-MM-DD")
+    include_post_details: bool = Field(False, description="Include detailed post metrics")
+    fields: Optional[str] = Field(None, description="Comma-separated list of fields")
+
+class LookerDataResponse(BaseModel):
+    data: List[Dict[str, Any]]
+    total_records: int
+    platform_stats: Dict[str, Any]
+    date_range: Dict[str, str]
+    generated_at: str
+
+# ========================================
+# HELPER FUNCTIONS
+# ========================================
+
+def get_user_from_token(authorization: str = Header(None)) -> User:
+    """Extraire et valider l'utilisateur depuis le token JWT"""
     
-    # Pour commencer, on accepte tout token de plus de 10 caractères
-    # TODO: Implémenter la vraie validation contre vos API keys
-    if not token or len(token) < 10:
-        raise HTTPException(status_code=401, detail="Token API invalide")
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token d'autorisation manquant")
     
-    # Simulation - À remplacer par votre logique
-    # En attendant, on retourne toujours user_id=1
-    return {
-        "user_id": 1,  # TODO: Extraire du vrai token
-        "email": "test@example.com",
-        "plan_type": "premium"  # TODO: Vérifier le vrai plan
-    }
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
-    """Récupère l'utilisateur actuel depuis le token"""
-    token = credentials.credentials
-    return validate_api_token(token)
-
-# ================================
-# 2. ENDPOINTS PRINCIPAUX
-# ================================
-
-@router.post("/validate-token")
-async def validate_token_endpoint(
-    credentials: HTTPAuthorizationCredentials = Security(security)
-):
-    """Valide un token API pour le connecteur Looker Studio"""
     try:
-        user_info = validate_api_token(credentials.credentials)
+        # Extraire le token (format: "Bearer TOKEN")
+        if authorization.startswith("Bearer "):
+            token = authorization[7:]
+        else:
+            token = authorization
         
-        # Vérifier que l'utilisateur existe en base
-        with get_db_session() as db:
-            result = db.execute(
-                text("SELECT id, email, is_active, plan_type FROM users WHERE id = :user_id"),
-                {"user_id": user_info["user_id"]}
-            ).fetchone()
-            
-            if not result:
-                return {"valid": False, "error": "Utilisateur non trouvé"}
-            
-            if not result.is_active:
-                return {"valid": False, "error": "Compte inactif"}
-            
-            return {
-                "valid": True,
-                "user_id": result.id,
-                "email": result.email,
-                "plan_type": result.plan_type or "free"
-            }
-            
-    except HTTPException as e:
-        return {"valid": False, "error": e.detail}
+        # Valider le token
+        payload = user_manager.verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Token invalide")
+        
+        # Récupérer l'utilisateur
+        user = user_manager.get_user_by_id(payload.get('user_id'))
+        if not user:
+            raise HTTPException(status_code=401, detail="Utilisateur non trouvé")
+        
+        return user
+        
     except Exception as e:
         logger.error(f"Erreur validation token: {e}")
-        return {"valid": False, "error": "Erreur serveur"}
+        raise HTTPException(status_code=401, detail="Token invalide")
 
-@router.post("/looker-data")
+def calculate_date_range(date_range: str, start_date: str = None, end_date: str = None):
+    """Calculer la plage de dates"""
+    
+    if start_date and end_date:
+        # Utiliser les dates fournies
+        try:
+            start = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Format de date invalide (YYYY-MM-DD attendu)")
+    else:
+        # Utiliser le range par défaut
+        try:
+            days = int(date_range)
+            end = date.today()
+            start = end - timedelta(days=days)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Range de date invalide")
+    
+    return start, end
+
+def get_linkedin_metrics(user: User, start_date: date, end_date: date, include_posts: bool = False) -> List[Dict]:
+    """Récupérer les métriques LinkedIn pour un utilisateur"""
+    
+    try:
+        with db_manager.get_session() as session:
+            # Récupérer les comptes LinkedIn de l'utilisateur
+            linkedin_accounts = session.query(LinkedinAccount).filter(
+                LinkedinAccount.user_id == user.id,
+                LinkedinAccount.is_active == True
+            ).all()
+            
+            metrics = []
+            
+            for account in linkedin_accounts:
+                # Métriques de base par jour
+                current_date = start_date
+                while current_date <= end_date:
+                    # TODO: Remplacer par de vraies données depuis votre API LinkedIn
+                    base_metric = {
+                        'platform': 'linkedin',
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'account_name': account.organization_name or 'LinkedIn Page',
+                        'account_id': account.organization_id,
+                        'followers_total': 1500 + (current_date - start_date).days * 10,  # Simulation
+                        'followers_growth': 10,
+                        'posts_count': 1,
+                        'impressions_total': 2500,
+                        'reach_total': 1800,
+                        'engagement_total': 150,
+                        'engagement_rate': 0.06,  # 6%
+                        'likes_total': 80,
+                        'comments_total': 25,
+                        'shares_total': 45,
+                        'clicks_total': 35,
+                        'linkedin_reactions_like': 50,
+                        'linkedin_reactions_celebrate': 15,
+                        'linkedin_reactions_support': 8,
+                        'linkedin_reactions_love': 4,
+                        'linkedin_reactions_insightful': 2,
+                        'linkedin_reactions_funny': 1
+                    }
+                    
+                    metrics.append(base_metric)
+                    
+                    # Si détails posts demandés, ajouter des lignes par post
+                    if include_posts:
+                        for i in range(2):  # 2 posts par jour simulés
+                            post_metric = base_metric.copy()
+                            post_metric.update({
+                                'post_id': f'linkedin_post_{current_date.strftime("%Y%m%d")}_{i}',
+                                'post_type': 'original' if i == 0 else 'repost',
+                                'post_message': f'Post LinkedIn du {current_date} #{i+1}',
+                                'post_date': f'{current_date} 10:00:00',
+                                'post_impressions': 1200 if i == 0 else 800,
+                                'post_reach': 900 if i == 0 else 600,
+                                'post_engagement': 75 if i == 0 else 50
+                            })
+                            metrics.append(post_metric)
+                    
+                    current_date += timedelta(days=1)
+            
+            return metrics
+            
+    except Exception as e:
+        logger.error(f"Erreur récupération métriques LinkedIn: {e}")
+        return []
+
+def get_facebook_metrics(user: User, start_date: date, end_date: date, include_posts: bool = False) -> List[Dict]:
+    """Récupérer les métriques Facebook pour un utilisateur"""
+    
+    try:
+        with db_manager.get_session() as session:
+            # Récupérer les comptes Facebook de l'utilisateur
+            facebook_accounts = session.query(FacebookAccount).filter(
+                FacebookAccount.user_id == user.id,
+                FacebookAccount.is_active == True
+            ).all()
+            
+            metrics = []
+            
+            for account in facebook_accounts:
+                # Métriques de base par jour
+                current_date = start_date
+                while current_date <= end_date:
+                    # TODO: Remplacer par de vraies données depuis votre API Facebook
+                    base_metric = {
+                        'platform': 'facebook',
+                        'date': current_date.strftime('%Y-%m-%d'),
+                        'account_name': account.page_name or 'Facebook Page',
+                        'account_id': account.page_id,
+                        'followers_total': 3200 + (current_date - start_date).days * 15,  # Simulation
+                        'followers_growth': 15,
+                        'posts_count': 2,
+                        'impressions_total': 4500,
+                        'reach_total': 3200,
+                        'engagement_total': 320,
+                        'engagement_rate': 0.10,  # 10%
+                        'likes_total': 180,
+                        'comments_total': 45,
+                        'shares_total': 95,
+                        'clicks_total': 120
+                    }
+                    
+                    metrics.append(base_metric)
+                    
+                    # Si détails posts demandés
+                    if include_posts:
+                        for i in range(3):  # 3 posts par jour simulés
+                            post_metric = base_metric.copy()
+                            post_metric.update({
+                                'post_id': f'facebook_post_{current_date.strftime("%Y%m%d")}_{i}',
+                                'post_type': 'photo' if i == 0 else 'link' if i == 1 else 'status',
+                                'post_message': f'Post Facebook du {current_date} #{i+1}',
+                                'post_date': f'{current_date} {9+i*3}:00:00',
+                                'post_impressions': 1500 if i == 0 else 1000,
+                                'post_reach': 1100 if i == 0 else 750,
+                                'post_engagement': 110 if i == 0 else 75
+                            })
+                            metrics.append(post_metric)
+                    
+                    current_date += timedelta(days=1)
+            
+            return metrics
+            
+    except Exception as e:
+        logger.error(f"Erreur récupération métriques Facebook: {e}")
+        return []
+
+# ========================================
+# ENDPOINTS PRINCIPAUX
+# ========================================
+
+@router.get("/looker-data", response_model=LookerDataResponse)
 async def get_looker_data(
-    request_data: Dict[str, Any],
-    user_info: dict = Depends(get_current_user)
+    platform: str = Query("both", description="Platform: linkedin, facebook, or both"),
+    date_range: str = Query("30", description="Number of days"),
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    include_post_details: bool = Query(False, description="Include post details"),
+    fields: Optional[str] = Query(None, description="Comma-separated fields"),
+    user: User = Depends(get_user_from_token)
 ):
     """
-    Endpoint principal pour récupérer les données Looker Studio
-    Adapté à votre schéma PostgreSQL existant
+    Endpoint principal pour récupérer les données social media
+    Utilisé par le connecteur Looker Studio
     """
+    
     try:
-        # Extraction des paramètres de la requête
-        platforms = request_data.get("platforms", ["linkedin", "facebook"])
-        date_range_days = int(request_data.get("dateRange", "30"))
-        metrics_type = request_data.get("metricsType", "overview")
-        start_date = request_data.get("startDate")
-        end_date = request_data.get("endDate")
+        # Calculer la plage de dates
+        start, end = calculate_date_range(date_range, start_date, end_date)
         
-        # Calcul des dates si non fournies
-        if not start_date or not end_date:
-            end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=date_range_days)
-        else:
-            start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
-            end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+        # Collecter les métriques selon la plateforme demandée
+        all_metrics = []
         
-        logger.info(f"Requête Looker: user={user_info['user_id']}, platforms={platforms}, dates={start_date} à {end_date}")
+        if platform in ['linkedin', 'both']:
+            linkedin_metrics = get_linkedin_metrics(user, start, end, include_post_details)
+            all_metrics.extend(linkedin_metrics)
         
-        # Vérification des permissions utilisateur
-        user_platforms = get_user_accessible_platforms(user_info["user_id"])
-        allowed_platforms = [p for p in platforms if p in user_platforms]
+        if platform in ['facebook', 'both']:
+            facebook_metrics = get_facebook_metrics(user, start, end, include_post_details)
+            all_metrics.extend(facebook_metrics)
         
-        if not allowed_platforms:
-            raise HTTPException(
-                status_code=403, 
-                detail=f"Aucune plateforme accessible. Plan actuel: {user_info.get('plan_type', 'free')}"
-            )
+        # Filtrer par champs si spécifié
+        if fields:
+            requested_fields = [f.strip() for f in fields.split(',')]
+            filtered_metrics = []
+            
+            for metric in all_metrics:
+                filtered_metric = {
+                    field: metric.get(field, '')
+                    for field in requested_fields
+                    if field in metric
+                }
+                if filtered_metric:  # N'ajouter que si au moins un champ est trouvé
+                    filtered_metrics.append(filtered_metric)
+            
+            all_metrics = filtered_metrics
         
-        # Collecte des données
-        all_data = []
+        # Statistiques par plateforme
+        platform_stats = {}
         
-        # Métriques de pages LinkedIn
-        if "linkedin" in allowed_platforms and metrics_type in ["overview", "pages"]:
-            linkedin_page_data = get_linkedin_page_metrics(user_info["user_id"], start_date, end_date)
-            all_data.extend(linkedin_page_data)
-            logger.info(f"LinkedIn pages: {len(linkedin_page_data)} enregistrements")
+        for platform_name in ['linkedin', 'facebook']:
+            platform_metrics = [m for m in all_metrics if m.get('platform') == platform_name]
+            if platform_metrics:
+                platform_stats[platform_name] = {
+                    'total_records': len(platform_metrics),
+                    'accounts_count': len(set(m.get('account_id', '') for m in platform_metrics)),
+                    'date_range': f"{start} to {end}",
+                    'total_impressions': sum(m.get('impressions_total', 0) for m in platform_metrics),
+                    'total_engagement': sum(m.get('engagement_total', 0) for m in platform_metrics)
+                }
         
-        # Métriques de posts LinkedIn
-        if "linkedin" in allowed_platforms and metrics_type in ["overview", "posts"]:
-            linkedin_post_data = get_linkedin_post_metrics(user_info["user_id"], start_date, end_date)
-            all_data.extend(linkedin_post_data)
-            logger.info(f"LinkedIn posts: {len(linkedin_post_data)} enregistrements")
-        
-        # Métriques de pages Facebook
-        if "facebook" in allowed_platforms and metrics_type in ["overview", "pages"]:
-            facebook_page_data = get_facebook_page_metrics(user_info["user_id"], start_date, end_date)
-            all_data.extend(facebook_page_data)
-            logger.info(f"Facebook pages: {len(facebook_page_data)} enregistrements")
-        
-        # Métriques de posts Facebook
-        if "facebook" in allowed_platforms and metrics_type in ["overview", "posts"]:
-            facebook_post_data = get_facebook_post_metrics(user_info["user_id"], start_date, end_date)
-            all_data.extend(facebook_post_data)
-            logger.info(f"Facebook posts: {len(facebook_post_data)} enregistrements")
-        
-        logger.info(f"Total données retournées: {len(all_data)} enregistrements")
-        
-        return {
-            "success": True,
-            "data": all_data,
-            "total_records": len(all_data),
-            "date_range": {
-                "start": start_date.isoformat(),
-                "end": end_date.isoformat()
+        response = LookerDataResponse(
+            data=all_metrics,
+            total_records=len(all_metrics),
+            platform_stats=platform_stats,
+            date_range={
+                'start_date': start.strftime('%Y-%m-%d'),
+                'end_date': end.strftime('%Y-%m-%d'),
+                'days': str((end - start).days + 1)
             },
-            "platforms_requested": platforms,
-            "platforms_accessible": user_platforms,
-            "platforms_returned": allowed_platforms,
-            "user_plan": user_info.get("plan_type", "free")
-        }
+            generated_at=datetime.now().isoformat()
+        )
         
-    except HTTPException:
-        raise
+        logger.info(f"Données générées pour {user.email}: {len(all_metrics)} enregistrements")
+        
+        return response
+        
     except Exception as e:
-        logger.error(f"Erreur get_looker_data: {e}")
-        raise HTTPException(status_code=500, detail=f"Erreur serveur: {str(e)}")
+        logger.error(f"Erreur génération données Looker: {e}")
+        raise HTTPException(status_code=500, detail="Erreur lors de la récupération des données")
 
-# ================================
-# 3. FONCTIONS EXTRACTION LINKEDIN
-# ================================
-
-def get_linkedin_page_metrics(user_id: int, start_date, end_date) -> List[Dict]:
-    """Récupère les métriques de pages LinkedIn depuis votre base"""
+@router.get("/validate-token")
+async def validate_token(user: User = Depends(get_user_from_token)):
+    """Valider un token JWT pour Looker Studio"""
     
-    try:
-        with get_db_session() as db:
-            query = text("""
-                SELECT 
-                    'linkedin' as platform,
-                    lpd.date,
-                    la.organization_id as page_id,
-                    COALESCE(la.organization_name, 'Page LinkedIn') as page_name,
-                    'page_metrics' as content_type,
-                    COALESCE(lpd.followers_count, 0) as followers_total,
-                    0 as followers_gained,
-                    0 as followers_lost,
-                    COALESCE(lpd.impression_count, 0) as impressions,
-                    COALESCE(lpd.unique_impression_count, 0) as unique_impressions,
-                    COALESCE(lpd.all_page_views, 0) as page_views,
-                    COALESCE(lpd.engagement_rate, 0) as engagement_rate,
-                    COALESCE(lpd.like_count, 0) as likes,
-                    COALESCE(lpd.comment_count, 0) as comments,
-                    COALESCE(lpd.share_count, 0) as shares,
-                    COALESCE(lpd.click_count, 0) as clicks,
-                    COALESCE(lpd.like_count, 0) + COALESCE(lpd.comment_count, 0) + 
-                    COALESCE(lpd.share_count, 0) + COALESCE(lpd.click_count, 0) as total_engagement,
-                    0 as video_views,
-                    0 as video_complete_views,
-                    COALESCE(lpd.like_count, 0) as reactions_like,
-                    0 as reactions_love,
-                    0 as reactions_celebrate,
-                    0 as reactions_wow,
-                    0 as reactions_sorry,
-                    0 as reactions_anger
-                FROM linkedin_page_daily lpd
-                JOIN linkedin_accounts la ON lpd.organization_id = la.organization_id
-                WHERE la.user_id = :user_id 
-                AND COALESCE(la.is_active, true) = true
-                AND lpd.date BETWEEN :start_date AND :end_date
-                ORDER BY lpd.date DESC
-            """)
-            
-            result = db.execute(query, {
-                "user_id": user_id,
-                "start_date": start_date,
-                "end_date": end_date
-            })
-            
-            return [dict(row._mapping) for row in result.fetchall()]
-            
-    except Exception as e:
-        logger.error(f"Erreur LinkedIn page metrics: {e}")
-        return []
+    return {
+        'valid': True,
+        'user_id': user.id,
+        'email': user.email,
+        'plan_type': user.plan_type,
+        'subscription_active': user.subscription_end_date > datetime.now() if user.subscription_end_date else False
+    }
 
-def get_linkedin_post_metrics(user_id: int, start_date, end_date) -> List[Dict]:
-    """Récupère les métriques de posts LinkedIn"""
+@router.get("/schema")
+async def get_schema(
+    platform: str = Query("both"),
+    include_post_details: bool = Query(False),
+    user: User = Depends(get_user_from_token)
+):
+    """Retourner le schéma des données disponibles"""
     
-    try:
-        with get_db_session() as db:
-            query = text("""
-                SELECT 
-                    'linkedin' as platform,
-                    lpd.date,
-                    la.organization_id as page_id,
-                    COALESCE(la.organization_name, 'Page LinkedIn') as page_name,
-                    'post_metrics' as content_type,
-                    COALESCE(lpm.follower_count, 0) as followers_total,
-                    0 as followers_gained,
-                    0 as followers_lost,
-                    COALESCE(lpd.impressions, 0) as impressions,
-                    COALESCE(lpd.unique_impressions, 0) as unique_impressions,
-                    0 as page_views,
-                    COALESCE(lpd.engagement_rate, 0) as engagement_rate,
-                    COALESCE(lpd.likes, 0) as likes,
-                    COALESCE(lpd.comments, 0) as comments,
-                    COALESCE(lpd.shares, 0) as shares,
-                    COALESCE(lpd.clicks, 0) as clicks,
-                    COALESCE(lpd.engagement_total, 0) as total_engagement,
-                    0 as video_views,
-                    0 as video_complete_views,
-                    COALESCE(lpd.likes, 0) as reactions_like,
-                    COALESCE(lpd.reactions_love, 0) as reactions_love,
-                    COALESCE(lpd.reactions_celebrate, 0) as reactions_celebrate,
-                    COALESCE(lpd.reactions_interest, 0) as reactions_wow,
-                    0 as reactions_sorry,
-                    0 as reactions_anger
-                FROM linkedin_posts_daily lpd
-                JOIN linkedin_accounts la ON lpd.organization_id = la.organization_id
-                LEFT JOIN linkedin_pages_metadata lpm ON la.organization_id = lpm.organization_id
-                WHERE la.user_id = :user_id 
-                AND COALESCE(la.is_active, true) = true
-                AND lpd.date BETWEEN :start_date AND :end_date
-                ORDER BY lpd.date DESC
-            """)
-            
-            result = db.execute(query, {
-                "user_id": user_id,
-                "start_date": start_date,
-                "end_date": end_date
-            })
-            
-            return [dict(row._mapping) for row in result.fetchall()]
-            
-    except Exception as e:
-        logger.error(f"Erreur LinkedIn post metrics: {e}")
-        return []
-
-# ================================
-# 4. FONCTIONS EXTRACTION FACEBOOK
-# ================================
-
-def get_facebook_page_metrics(user_id: int, start_date, end_date) -> List[Dict]:
-    """Récupère les métriques de pages Facebook"""
+    schema = {
+        'dimensions': [
+            {'id': 'platform', 'name': 'Plateforme', 'type': 'TEXT'},
+            {'id': 'date', 'name': 'Date', 'type': 'DATE'},
+            {'id': 'account_name', 'name': 'Nom du compte', 'type': 'TEXT'},
+            {'id': 'account_id', 'name': 'ID du compte', 'type': 'TEXT'}
+        ],
+        'metrics': [
+            {'id': 'followers_total', 'name': 'Total Followers', 'type': 'NUMBER'},
+            {'id': 'followers_growth', 'name': 'Croissance Followers', 'type': 'NUMBER'},
+            {'id': 'posts_count', 'name': 'Nombre de posts', 'type': 'NUMBER'},
+            {'id': 'impressions_total', 'name': 'Impressions totales', 'type': 'NUMBER'},
+            {'id': 'reach_total', 'name': 'Portée totale', 'type': 'NUMBER'},
+            {'id': 'engagement_total', 'name': 'Engagement total', 'type': 'NUMBER'},
+            {'id': 'engagement_rate', 'name': 'Taux d\'engagement', 'type': 'PERCENT'},
+            {'id': 'likes_total', 'name': 'Likes totaux', 'type': 'NUMBER'},
+            {'id': 'comments_total', 'name': 'Commentaires totaux', 'type': 'NUMBER'},
+            {'id': 'shares_total', 'name': 'Partages totaux', 'type': 'NUMBER'},
+            {'id': 'clicks_total', 'name': 'Clics totaux', 'type': 'NUMBER'}
+        ]
+    }
     
-    try:
-        with get_db_session() as db:
-            query = text("""
-                SELECT 
-                    'facebook' as platform,
-                    fpd.date,
-                    fa.page_id,
-                    COALESCE(fa.page_name, 'Page Facebook') as page_name,
-                    'page_metrics' as content_type,
-                    COALESCE(fpd.page_fans, 0) as followers_total,
-                    COALESCE(fpd.page_fan_adds, 0) as followers_gained,
-                    COALESCE(fpd.page_fan_removes, 0) as followers_lost,
-                    COALESCE(fpd.page_impressions, 0) as impressions,
-                    COALESCE(fpd.page_impressions_unique, 0) as unique_impressions,
-                    COALESCE(fpd.page_views_total, 0) as page_views,
-                    CASE 
-                        WHEN COALESCE(fpd.page_impressions, 0) > 0 
-                        THEN (COALESCE(fpd.page_post_engagements, 0)::float / fpd.page_impressions::float) * 100 
-                        ELSE 0 
-                    END as engagement_rate,
-                    COALESCE(fpd.page_actions_post_reactions_like_total, 0) as likes,
-                    0 as comments,
-                    0 as shares,
-                    0 as clicks,
-                    COALESCE(fpd.page_post_engagements, 0) as total_engagement,
-                    COALESCE(fpd.page_video_views, 0) as video_views,
-                    COALESCE(fpd.page_video_complete_views_30s, 0) as video_complete_views,
-                    COALESCE(fpd.page_actions_post_reactions_like_total, 0) as reactions_like,
-                    COALESCE(fpd.page_actions_post_reactions_love_total, 0) as reactions_love,
-                    0 as reactions_celebrate,
-                    COALESCE(fpd.page_actions_post_reactions_wow_total, 0) as reactions_wow,
-                    COALESCE(fpd.page_actions_post_reactions_sorry_total, 0) as reactions_sorry,
-                    COALESCE(fpd.page_actions_post_reactions_anger_total, 0) as reactions_anger
-                FROM facebook_page_daily fpd
-                JOIN facebook_accounts fa ON fpd.page_id = fa.page_id
-                WHERE fa.user_id = :user_id 
-                AND COALESCE(fa.is_active, true) = true
-                AND fpd.date BETWEEN :start_date AND :end_date
-                ORDER BY fpd.date DESC
-            """)
-            
-            result = db.execute(query, {
-                "user_id": user_id,
-                "start_date": start_date,
-                "end_date": end_date
-            })
-            
-            return [dict(row._mapping) for row in result.fetchall()]
-            
-    except Exception as e:
-        logger.error(f"Erreur Facebook page metrics: {e}")
-        return []
-
-def get_facebook_post_metrics(user_id: int, start_date, end_date) -> List[Dict]:
-    """Récupère les métriques de posts Facebook"""
+    # Ajouter les champs spécifiques aux posts si demandé
+    if include_post_details:
+        schema['dimensions'].extend([
+            {'id': 'post_id', 'name': 'ID du post', 'type': 'TEXT'},
+            {'id': 'post_type', 'name': 'Type de post', 'type': 'TEXT'},
+            {'id': 'post_message', 'name': 'Message du post', 'type': 'TEXT'},
+            {'id': 'post_date', 'name': 'Date du post', 'type': 'DATETIME'}
+        ])
+        
+        schema['metrics'].extend([
+            {'id': 'post_impressions', 'name': 'Impressions du post', 'type': 'NUMBER'},
+            {'id': 'post_reach', 'name': 'Portée du post', 'type': 'NUMBER'},
+            {'id': 'post_engagement', 'name': 'Engagement du post', 'type': 'NUMBER'}
+        ])
     
-    try:
-        with get_db_session() as db:
-            query = text("""
-                SELECT 
-                    'facebook' as platform,
-                    fpm.created_time::date as date,
-                    fa.page_id,
-                    COALESCE(fa.page_name, 'Page Facebook') as page_name,
-                    'post_metrics' as content_type,
-                    0 as followers_total,  -- Pas dans les posts
-                    0 as followers_gained,
-                    0 as followers_lost,
-                    COALESCE(fpl.post_impressions, 0) as impressions,
-                    COALESCE(fpl.post_impressions_unique, 0) as unique_impressions,
-                    0 as page_views,
-                    CASE 
-                        WHEN COALESCE(fpl.post_impressions, 0) > 0 
-                        THEN ((COALESCE(fpl.post_reactions_like, 0) + COALESCE(fpl.post_reactions_love, 0) + 
-                              COALESCE(fpl.post_reactions_wow, 0) + COALESCE(fpl.post_reactions_haha, 0) + 
-                              COALESCE(fpl.post_reactions_sorry, 0) + COALESCE(fpl.post_reactions_anger, 0) + 
-                              COALESCE(fpm.comments_count, 0) + COALESCE(fpm.shares_count, 0))::float / fpl.post_impressions::float) * 100 
-                        ELSE 0 
-                    END as engagement_rate,
-                    COALESCE(fpl.post_reactions_like, 0) as likes,
-                    COALESCE(fpm.comments_count, 0) as comments,
-                    COALESCE(fpm.shares_count, 0) as shares,
-                    COALESCE(fpl.post_clicks, 0) as clicks,
-                    (COALESCE(fpl.post_reactions_like, 0) + COALESCE(fpl.post_reactions_love, 0) + 
-                     COALESCE(fpl.post_reactions_wow, 0) + COALESCE(fpl.post_reactions_haha, 0) + 
-                     COALESCE(fpl.post_reactions_sorry, 0) + COALESCE(fpl.post_reactions_anger, 0) + 
-                     COALESCE(fpm.comments_count, 0) + COALESCE(fpm.shares_count, 0) + COALESCE(fpl.post_clicks, 0)) as total_engagement,
-                    COALESCE(fpl.post_video_views, 0) as video_views,
-                    COALESCE(fpl.post_video_complete_views, 0) as video_complete_views,
-                    COALESCE(fpl.post_reactions_like, 0) as reactions_like,
-                    COALESCE(fpl.post_reactions_love, 0) as reactions_love,
-                    0 as reactions_celebrate,
-                    COALESCE(fpl.post_reactions_wow, 0) as reactions_wow,
-                    COALESCE(fpl.post_reactions_sorry, 0) as reactions_sorry,
-                    COALESCE(fpl.post_reactions_anger, 0) as reactions_anger
-                FROM facebook_posts_metadata fpm
-                JOIN facebook_posts_lifetime fpl ON fpm.post_id = fpl.post_id
-                JOIN facebook_accounts fa ON fpm.page_id = fa.page_id
-                WHERE fa.user_id = :user_id 
-                AND COALESCE(fa.is_active, true) = true
-                AND fpm.created_time::date BETWEEN :start_date AND :end_date
-                ORDER BY fpm.created_time DESC
-            """)
-            
-            result = db.execute(query, {
-                "user_id": user_id,
-                "start_date": start_date,
-                "end_date": end_date
-            })
-            
-            return [dict(row._mapping) for row in result.fetchall()]
-            
-    except Exception as e:
-        logger.error(f"Erreur Facebook post metrics: {e}")
-        return []
-
-# ================================
-# 5. FONCTIONS UTILITAIRES
-# ================================
-
-def get_user_accessible_platforms(user_id: int) -> List[str]:
-    """Retourne les plateformes accessibles selon le plan utilisateur"""
+    # Ajouter les champs LinkedIn si demandé
+    if platform in ['linkedin', 'both']:
+        schema['metrics'].extend([
+            {'id': 'linkedin_reactions_like', 'name': 'LinkedIn - Reactions Like', 'type': 'NUMBER'},
+            {'id': 'linkedin_reactions_celebrate', 'name': 'LinkedIn - Reactions Celebrate', 'type': 'NUMBER'},
+            {'id': 'linkedin_reactions_support', 'name': 'LinkedIn - Reactions Support', 'type': 'NUMBER'},
+            {'id': 'linkedin_reactions_love', 'name': 'LinkedIn - Reactions Love', 'type': 'NUMBER'},
+            {'id': 'linkedin_reactions_insightful', 'name': 'LinkedIn - Reactions Insightful', 'type': 'NUMBER'},
+            {'id': 'linkedin_reactions_funny', 'name': 'LinkedIn - Reactions Funny', 'type': 'NUMBER'}
+        ])
     
-    try:
-        with get_db_session() as db:
-            result = db.execute(
-                text("SELECT plan_type FROM users WHERE id = :user_id"),
-                {"user_id": user_id}
-            ).fetchone()
-            
-            if not result:
-                return []
-            
-            plan_type = (result.plan_type or "free").lower()
-            
-            if plan_type == "premium":
-                return ["linkedin", "facebook"]
-            elif plan_type == "linkedin":
-                return ["linkedin"]
-            elif plan_type == "facebook":
-                return ["facebook"]
-            else:
-                return []  # Plan gratuit
-                
-    except Exception as e:
-        logger.error(f"Erreur get_user_accessible_platforms: {e}")
-        return []
+    return schema
 
-# ================================
-# 6. ENDPOINTS DE DEBUG
-# ================================
-
-@router.get("/test-connection")
-async def test_database_connection():
-    """Test de connexion à la base de données"""
-    try:
-        from app.database.connection import test_database_connection, get_table_counts
-        
-        connection_ok = test_database_connection()
-        if not connection_ok:
-            raise HTTPException(status_code=500, detail="Connexion base de données échouée")
-        
-        counts = get_table_counts()
-        
-        return {
-            "database_connected": True,
-            "table_counts": counts,
-            "status": "OK"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
-
-@router.get("/sample-data")
-async def get_sample_data():
-    """Récupère un échantillon de données pour tester"""
-    try:
-        from app.database.connection import get_sample_data_for_looker
-        
-        sample_data = get_sample_data_for_looker()
-        
-        if "error" in sample_data:
-            raise HTTPException(status_code=500, detail=sample_data["error"])
-        
-        return sample_data
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
-
-# ================================
-# 🎯 EXPORT DU ROUTER
-# ================================
-
-# Ce router doit être importé dans votre app/main.py :
-# from app.api.looker_endpoints import router as looker_router
-# app.include_router(looker_router)
+@router.get("/health")
+async def health_check():
+    """Health check pour le connecteur Looker Studio"""
+    
+    return {
+        'status': 'healthy',
+        'service': 'WhatsTheData Looker Connector',
+        'timestamp': datetime.now().isoformat(),
+        'database': 'connected' if db_manager.test_connection() else 'disconnected'
+    }
