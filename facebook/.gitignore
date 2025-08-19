@@ -27,3 +27,5 @@ reports/
 # Tests locaux
 test_*.json
 migrated_to_cloud.py
+facebook/configs
+facebook/.env
