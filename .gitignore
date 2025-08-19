@@ -54,3 +54,7 @@ Thumbs.db
 # Résultats de tests
 test_results/
 *.test.json**/pages_config.json
+
+# Facebook local configs (ne pas suivre)
+facebook/configs/
+facebook/test_local.py
