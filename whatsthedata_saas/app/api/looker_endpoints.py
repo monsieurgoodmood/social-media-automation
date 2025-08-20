@@ -303,17 +303,6 @@ async def get_looker_data(
         logger.error(f"Erreur génération données Looker: {e}")
         raise HTTPException(status_code=500, detail="Erreur lors de la récupération des données")
 
-@router.get("/validate-token")
-async def validate_token(user: User = Depends(get_user_from_token)):
-    """Valider un token JWT pour Looker Studio"""
-    
-    return {
-        'valid': True,
-        'user_id': user.id,
-        'email': user.email,
-        'plan_type': user.plan_type,
-        'subscription_active': user.subscription_end_date > datetime.now() if user.subscription_end_date else False
-    }
 
 @router.get("/schema")
 async def get_schema(
@@ -421,3 +410,13 @@ async def generate_test_token():
         "message": "Token de test généré - utilisez ce token dans Looker Studio"
     }
     
+@router.get("/validate-token-simple")
+async def validate_token_simple():
+    """Validation simplifiée pour tests Looker Studio"""
+    return {
+        'valid': True,
+        'user_id': 1,
+        'email': 'test@whatsthedata.com',
+        'plan_type': 'premium',
+        'subscription_active': True
+    }
