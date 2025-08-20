@@ -383,3 +383,30 @@ async def health_check():
         'timestamp': datetime.now().isoformat(),
         'database': 'connected' if db_manager.test_connection() else 'disconnected'
     }
+    
+    
+@router.get("/test-data")
+async def get_test_data():
+    """Endpoint de test sans authentification"""
+    return {
+        "data": [
+            {
+                "platform": "linkedin",
+                "date": "2025-08-20",
+                "account_name": "Test LinkedIn",
+                "followers_total": 1500,
+                "impressions_total": 2500,
+                "engagement_total": 150
+            },
+            {
+                "platform": "facebook", 
+                "date": "2025-08-20",
+                "account_name": "Test Facebook",
+                "followers_total": 3200,
+                "impressions_total": 4500,
+                "engagement_total": 320
+            }
+        ],
+        "total_records": 2,
+        "status": "test_data"
+    }

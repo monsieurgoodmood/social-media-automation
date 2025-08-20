@@ -15,7 +15,7 @@ import uvicorn
 # Imports de vos modules
 from app.utils.config import Config, settings
 from app.database.connection import init_database, test_database_connection
-# from app.api.looker_endpoints import router as looker_router
+from app.api.looker_endpoints import router as looker_router
 
 # Configuration des logs
 logging.basicConfig(
@@ -147,10 +147,10 @@ async def health_check():
 # ================================
 
 # Router principal pour Looker Studio
-# app.include_router(
-#     looker_router,
-#     tags=["Looker Studio API"]
-# )
+app.include_router(
+    looker_router,
+    tags=["Looker Studio API"]
+)
 
 # ================================
 # 💳 WEBHOOK STRIPE
