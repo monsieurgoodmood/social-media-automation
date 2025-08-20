@@ -67,7 +67,7 @@ function setCredentials(request) {
  */
 function validateApiKey(token) {
   try {
-    var response = UrlFetchApp.fetch(API_BASE_URL + '/api/v1/validate-token', {
+    var response = UrlFetchApp.fetch(API_BASE_URL + '/api/v1/validate-token-simple', {
       method: 'GET',
       headers: {
         'Authorization': 'Bearer ' + token,
