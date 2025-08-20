@@ -360,3 +360,41 @@ if __name__ == "__main__":
         print(f"❌ Erreur lors du test: {e}")
         import traceback
         traceback.print_exc()
+# ============================================
+# ALIASES DE COMPATIBILITÉ POUR MAIN.PY
+# ============================================
+
+class ConfigProxy:
+    """Proxy pour compatibilité avec main.py"""
+    
+    def __init__(self, config_manager):
+        self._config = config_manager
+    
+    @property
+    def LOG_LEVEL(self):
+        return self._config.logging['level']
+    
+    @property
+    def APP_VERSION(self):
+        return self._config.app['version']
+    
+    @property
+    def DEBUG(self):
+        return self._config.app['debug']
+    
+    @property
+    def ENVIRONMENT(self):
+        return self._config.app['environment']
+    
+    def validate_required_settings(self):
+        return self._config.validate_config()
+    
+    def get_cors_origins(self):
+        return self._config.security['cors_origins']
+    
+    def get_env_summary(self):
+        return self._config.get_config_summary()
+
+# Instance de compatibilité
+Config = ConfigProxy(config_manager)
+settings = config_manager
