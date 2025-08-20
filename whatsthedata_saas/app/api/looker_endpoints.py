@@ -410,3 +410,13 @@ async def get_test_data():
         "total_records": 2,
         "status": "test_data"
     }
+    
+@router.get("/generate-test-token")
+async def generate_test_token():
+    """Génère un token de test pour Looker Studio"""
+    return {
+        "token": "test_token_whatsthedata_123",
+        "username": "test_user",
+        "valid_until": "2025-08-21",
+        "message": "Token de test généré - utilisez ce token dans Looker Studio"
+    }
