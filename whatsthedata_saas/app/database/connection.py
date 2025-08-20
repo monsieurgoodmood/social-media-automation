@@ -14,7 +14,6 @@ from sqlalchemy import create_engine, pool, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError, DisconnectionError, OperationalError
 from sqlalchemy.pool import QueuePool
-import psycopg2
 from psycopg2 import OperationalError as Psycopg2OperationalError
 
 from .models import Base, User, FacebookAccount, LinkedinAccount
@@ -41,6 +40,8 @@ class DatabaseManager:
         database_url = get_env_var('DATABASE_URL')
         if database_url:
             logger.info("Utilisation de DATABASE_URL pour la connexion")
+            if database_url.startswith('postgres://'):
+                        database_url = database_url.replace('postgres://', 'postgresql://', 1)
             return database_url
             
         # Variables individuelles pour développement local
