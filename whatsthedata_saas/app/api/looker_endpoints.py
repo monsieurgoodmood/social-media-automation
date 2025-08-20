@@ -421,13 +421,3 @@ async def generate_test_token():
         "message": "Token de test généré - utilisez ce token dans Looker Studio"
     }
     
-@router.get("/validate-token")
-async def validate_token():
-    """Validation simplifiée pour tests Looker Studio"""
-    return {
-        'valid': True,
-        'user_id': 1,
-        'email': 'test@whatsthedata.com',
-        'plan_type': 'premium',
-        'subscription_active': True
-    }
