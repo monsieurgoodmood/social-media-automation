@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Configuration validée")
         
         # Test de connexion base de données
-        if test_database_connection():
+        if init_database():
             logger.info("✅ Base de données connectée")
         else:
             logger.warning("⚠️ Problème de connexion base de données")
