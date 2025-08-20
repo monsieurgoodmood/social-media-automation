@@ -67,3 +67,4 @@ redis==5.0.1
 # File processing
 PyPDF2==3.0.1
 python-magic==0.4.27
+PyJWT==2.8.0
