@@ -556,3 +556,9 @@ if __name__ == "__main__":
         
     else:
         print("❌ Échec de la connexion")
+def test_database_connection():
+    """Test simple de connexion base de données"""
+    try:
+        return db_manager.test_connection(retries=1)
+    except:
+        return False
