@@ -420,3 +420,13 @@ async def generate_test_token():
         "valid_until": "2025-08-21",
         "message": "Token de test généré - utilisez ce token dans Looker Studio"
     }
+    
+@router.get("/validate-token")
+async def validate_token_simple():
+    """Validation simplifiée pour le connecteur Looker"""
+    return {
+        "valid": True,
+        "user_id": 1,
+        "email": "test@whatsthedata.com",
+        "plan_type": "premium"
+    }
