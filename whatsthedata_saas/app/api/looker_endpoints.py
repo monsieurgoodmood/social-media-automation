@@ -422,11 +422,12 @@ async def generate_test_token():
     }
     
 @router.get("/validate-token")
-async def validate_token_simple():
-    """Validation simplifiée pour le connecteur Looker"""
+async def validate_token():
+    """Validation simplifiée pour tests Looker Studio"""
     return {
-        "valid": True,
-        "user_id": 1,
-        "email": "test@whatsthedata.com",
-        "plan_type": "premium"
+        'valid': True,
+        'user_id': 1,
+        'email': 'test@whatsthedata.com',
+        'plan_type': 'premium',
+        'subscription_active': True
     }
