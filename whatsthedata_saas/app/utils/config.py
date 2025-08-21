@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # Charger le fichier .env
-env_path = Path(__file__).parent.parent / '.env'
+env_path = Path(__file__).parent.parent.parent / '.env'
 load_dotenv(env_path)
 
 def get_env_var(key: str, default: Optional[str] = None, required: bool = False) -> Optional[str]:
@@ -92,6 +92,19 @@ class ConfigManager:
             'testing': get_env_bool('TESTING', False)
         }
         
+        # 🆕 AJOUT - Configuration Google OAuth
+        self.google_oauth = {
+            'client_id': get_env_var('GOOGLE_CLIENT_ID', required=True),
+            'client_secret': get_env_var('GOOGLE_CLIENT_SECRET', required=True),
+            'redirect_uri': get_env_var('GOOGLE_REDIRECT_URI', required=True),
+            'scopes': get_env_list('GOOGLE_OAUTH_SCOPES', ['openid', 'email', 'profile']),
+            'urls': {
+                'auth': get_env_var('GOOGLE_AUTH_URL', 'https://accounts.google.com/o/oauth2/v2/auth'),
+                'token': get_env_var('GOOGLE_TOKEN_URL', 'https://oauth2.googleapis.com/token'),
+                'userinfo': get_env_var('GOOGLE_USERINFO_URL', 'https://www.googleapis.com/oauth2/v2/userinfo')
+            }
+        }
+    
         # Configuration JWT
         self.jwt = {
             'secret_key': get_env_var('JWT_SECRET_KEY', required=True),
@@ -239,6 +252,25 @@ class ConfigManager:
         
         # Vérifier les configurations critiques
         try:
+            # 🆕 AJOUT - Validation Google OAuth
+            if not self.google_oauth['client_id']:
+                validation_results['errors'].append("GOOGLE_CLIENT_ID manquant")
+            elif not self.google_oauth['client_id'].endswith('.apps.googleusercontent.com'):
+                validation_results['warnings'].append("GOOGLE_CLIENT_ID ne semble pas valide")
+            
+            if not self.google_oauth['client_secret']:
+                validation_results['errors'].append("GOOGLE_CLIENT_SECRET manquant")
+            elif not self.google_oauth['client_secret'].startswith('GOCSPX-'):
+                validation_results['warnings'].append("GOOGLE_CLIENT_SECRET ne semble pas valide")
+            
+            if not self.google_oauth['redirect_uri']:
+                validation_results['errors'].append("GOOGLE_REDIRECT_URI manquant")
+            
+            # Validation HTTPS en production pour Google OAuth
+            if self.app['environment'] == 'production':
+                if not self.google_oauth['redirect_uri'].startswith('https://'):
+                    validation_results['errors'].append("GOOGLE_REDIRECT_URI doit utiliser HTTPS en production")
+
             # JWT
             if len(self.jwt['secret_key']) < 32:
                 validation_results['errors'].append("JWT_SECRET_KEY doit faire au moins 32 caractères")
@@ -273,6 +305,11 @@ class ConfigManager:
         """Obtenir un résumé des configurations (sans données sensibles)"""
         
         return {
+            'google_oauth': {
+                'configured': bool(self.google_oauth['client_id']),
+                'scopes_count': len(self.google_oauth['scopes']),
+                'redirect_uri_https': self.google_oauth['redirect_uri'].startswith('https://')
+            },
             'app': {
                 'name': self.app['name'],
                 'version': self.app['version'],
@@ -385,6 +422,53 @@ class ConfigProxy:
     @property
     def ENVIRONMENT(self):
         return self._config.app['environment']
+    
+    @property
+    def LOG_LEVEL(self):
+        return self._config.logging['level']
+    
+    @property
+    def APP_VERSION(self):
+        return self._config.app['version']
+    
+    @property
+    def DEBUG(self):
+        return self._config.app['debug']
+    
+    @property
+    def BASE_URL(self):
+        return self._config.app['base_url']
+    
+    # 🆕 AJOUT - Propriétés Google OAuth
+    @property
+    def GOOGLE_CLIENT_ID(self):
+        return self._config.google_oauth['client_id']
+    
+    @property
+    def GOOGLE_CLIENT_SECRET(self):
+        return self._config.google_oauth['client_secret']
+    
+    @property
+    def GOOGLE_REDIRECT_URI(self):
+        return self._config.google_oauth['redirect_uri']
+    
+    # 🆕 AJOUT - Propriétés LinkedIn pour compatibilité avec connect_routes.py
+    @property
+    def LINKEDIN_CLIENT_ID(self):
+        return self._config.linkedin['community']['client_id']
+    
+    @property
+    def LINKEDIN_CLIENT_SECRET(self):
+        return self._config.linkedin['community']['client_secret']
+    
+    # 🆕 AJOUT - Propriétés Facebook pour compatibilité
+    @property
+    def FB_CLIENT_ID(self):
+        return self._config.facebook['client_id']
+    
+    @property
+    def FB_CLIENT_SECRET(self):
+        return self._config.facebook['client_secret']
     
     def validate_required_settings(self):
         return self._config.validate_config()

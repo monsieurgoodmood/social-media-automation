@@ -19,46 +19,74 @@ function getAuthType() {
   var cc = DataStudioApp.createCommunityConnector();
   return cc
     .newAuthTypeResponse()
-    .setAuthType(cc.AuthType.USER_TOKEN)
-    .setHelpUrl('https://whatsthedata.com/help/api-key')
+    .setAuthType(cc.AuthType.OAUTH2)
     .build();
 }
 
 function isAuthValid() {
-  var userToken = PropertiesService.getUserProperties().getProperty('dscc.token');
-  if (!userToken) return false;
+  console.log('=== Début isAuthValid ===');
   
-  try {
-    var response = validateApiKey(userToken);
-    return response && response.valid === true;
-  } catch (e) {
-    console.error('Erreur validation auth:', e);
+  var userEmail = Session.getActiveUser().getEmail();
+  console.log('Email utilisateur:', userEmail);
+  
+  // Pour OAuth2, on vérifie juste que l'utilisateur Google est connecté
+  // La vérification d'abonnement se fera plus tard dans getData()
+  if (!userEmail) {
+    console.log('Pas d\'email - retour false');
     return false;
   }
+  
+  console.log('Utilisateur Google connecté - retour true');
+  return true;
 }
 
 function resetAuth() {
-  PropertiesService.getUserProperties().deleteProperty('dscc.token');
+  // Pas besoin de supprimer de token car OAuth2 Google gère automatiquement
+  return;
 }
 
-function setCredentials(request) {
-  var token = request.userToken.token;
-  
-  if (!token || token.trim() === '') {
-    return { errorCode: 'INVALID_CREDENTIALS' };
-  }
-  
+/**
+ * Point d'entrée OAuth2 - Vérifie l'utilisateur et redirige si nécessaire
+ */
+function checkUserSubscription(userEmail) {
   try {
-    var validationResponse = validateApiKey(token);
-    if (!validationResponse || !validationResponse.valid) {
-      return { errorCode: 'INVALID_CREDENTIALS' };
+    var response = UrlFetchApp.fetch(API_BASE_URL + '/api/v1/check-user-looker', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      payload: JSON.stringify({
+        email: userEmail,
+        source: 'looker_studio'
+      }),
+      muteHttpExceptions: true
+    });
+    
+    var responseCode = response.getResponseCode();
+    var data = JSON.parse(response.getContentText());
+    
+    if (responseCode === 200 && data.valid) {
+      // Utilisateur valide avec abonnement actif
+      return { valid: true, user: data.user };
+    } else if (responseCode === 404) {
+      // Utilisateur n'existe pas - redirection vers inscription
+      var redirectUrl = API_BASE_URL + '/connect?source=looker&email=' + encodeURIComponent(userEmail);
+      throw new Error('REDIRECT_TO_SIGNUP:' + redirectUrl);
+    } else if (responseCode === 403) {
+      // Utilisateur existe mais abonnement expiré/insuffisant
+      var redirectUrl = API_BASE_URL + '/connect/upgrade?source=looker&email=' + encodeURIComponent(userEmail);
+      throw new Error('REDIRECT_TO_UPGRADE:' + redirectUrl);
+    } else {
+      return { valid: false, error: data.message };
     }
     
-    PropertiesService.getUserProperties().setProperty('dscc.token', token);
-    return { errorCode: 'NONE' };
   } catch (e) {
-    console.error('Erreur setCredentials:', e);
-    return { errorCode: 'INVALID_CREDENTIALS' };
+    if (e.message.startsWith('REDIRECT_TO_')) {
+      // Re-throw les erreurs de redirection
+      throw e;
+    }
+    console.error('Erreur checkUserSubscription:', e);
+    return { valid: false, error: e.toString() };
   }
 }
 
@@ -87,6 +115,19 @@ function validateApiKey(token) {
     return { valid: false };
   }
 }
+
+function get3PAuthorizationUrls() {
+  console.log('=== get3PAuthorizationUrls appelée ===');
+  return null;
+}
+
+function authCallback(request) {
+  console.log('=== authCallback appelée ===', request);
+  return { 
+    errorCode: 'NONE'
+  };
+}
+
 
 // ================================
 // 3. CONFIGURATION DU CONNECTEUR (INCHANGÉE)
@@ -601,38 +642,46 @@ function getSchema(request) {
 // ================================
 
 function getData(request) {
-  var userToken = PropertiesService.getUserProperties().getProperty('dscc.token');
-  
-  if (!userToken) {
-    throw new Error('Token d\'authentification manquant');
-  }
+  var userEmail = Session.getActiveUser().getEmail();
+  console.log('=== getData pour:', userEmail);
   
   try {
-    // Construction des paramètres de requête
-    var queryParams = {
-      platforms: request.configParams.platforms || ['linkedin', 'facebook'],
-      dateRange: request.configParams.date_range || '30',
-      metricsType: request.configParams.metrics_type || 'overview',
-      includeBreakdown: request.configParams.include_breakdown || false,
-      startDate: request.dateRange.startDate,
-      endDate: request.dateRange.endDate,
-      fields: request.fields.map(function(field) { return field.name; })
-    };
+    // Vérifier l'abonnement utilisateur
+    var subscriptionCheck = checkUserSubscription(userEmail);
     
-    // Appel à votre API RÉELLE
-    var apiResponse = callWhatsTheDataAPI(userToken, queryParams);
-    
-    if (!apiResponse || !apiResponse.success) {
-      // Si l'API échoue, utiliser les données de test en fallback
-      console.log('API indisponible, utilisation des données de test');
-      var allData = generateFallbackTestData(queryParams.platforms, queryParams.startDate, queryParams.endDate, queryParams.metricsType, queryParams.includeBreakdown);
-    } else {
-      var allData = apiResponse.data;
+    if (!subscriptionCheck || !subscriptionCheck.valid) {
+      // Créer un message d'erreur avec lien vers inscription
+      var signupUrl = API_BASE_URL + '/connect?source=looker&email=' + encodeURIComponent(userEmail);
+      
+      DataStudioApp.createCommunityConnector()
+        .newUserError()
+        .setText('Abonnement WhatsTheData requis. Inscrivez-vous sur: ' + signupUrl)
+        .setDebugText('Utilisateur non trouvé: ' + userEmail)
+        .throwException();
     }
+    
+    // Si l'utilisateur est valide, générer des données de test pour l'instant
+    console.log('Utilisateur valide, génération des données...');
+    
+    var platforms = request.configParams.platforms || ['linkedin'];
+    var dateRange = request.configParams.date_range || '30';
+    
+    // Générer des données de test simples
+    var testData = [
+      {
+        platform: 'linkedin',
+        date: '2025-08-21',
+        account_name: 'LinkedIn Test',
+        account_id: 'test_123',
+        total_followers: 1500,
+        page_impressions: 2500,
+        total_engagement: 150
+      }
+    ];
     
     // Transformation des données pour Looker Studio
     var fieldNames = request.fields.map(function(field) { return field.name; });
-    var transformedData = transformDataForLookerStudio(allData, fieldNames);
+    var transformedData = transformDataForLookerStudio(testData, fieldNames);
     
     return {
       schema: getSchema(request).schema,
@@ -641,10 +690,16 @@ function getData(request) {
     
   } catch (e) {
     console.error('Erreur getData:', e);
+    
+    // Re-throw les erreurs de redirection
+    if (e.message && e.message.indexOf('REDIRECT_TO_') !== -1) {
+      throw e;
+    }
+    
     DataStudioApp.createCommunityConnector()
       .newUserError()
       .setDebugText('Erreur: ' + e.toString())
-      .setText('Impossible de récupérer les données. Vérifiez votre clé API.')
+      .setText('Erreur lors de la récupération des données: ' + e.message)
       .throwException();
   }
 }

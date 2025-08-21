@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, date
 from pydantic import BaseModel, Field
 import logging
 import json
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 
 from ..auth.user_manager import user_manager
 from ..database.connection import db_manager
@@ -222,6 +223,93 @@ def get_facebook_metrics(user: User, start_date: date, end_date: date, include_p
 # ========================================
 # ENDPOINTS PRINCIPAUX
 # ========================================
+
+@router.post("/check-user-looker")
+async def check_user_looker(request: Request):
+    """Vérifier si un utilisateur peut accéder au connecteur Looker"""
+    
+    try:
+        data = await request.json()
+        user_email = data.get('email')
+        source = data.get('source', 'looker_studio')
+        
+        if not user_email:
+            raise HTTPException(status_code=400, detail="Email manquant")
+        
+        # Récupérer l'utilisateur par email
+        with db_manager.get_session() as session:
+            user = session.query(User).filter(User.email == user_email).first()
+            
+            if not user:
+                # Utilisateur n'existe pas - besoin d'inscription
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "valid": False,
+                        "message": "Utilisateur non trouvé",
+                        "action": "signup",
+                        "redirect_url": f"{Config.BASE_URL}/connect?source=looker&email={user_email}"
+                    }
+                )
+            
+            if not user.is_active:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "valid": False,
+                        "message": "Compte désactivé",
+                        "action": "contact_support"
+                    }
+                )
+            
+            # Vérifier l'abonnement
+            if user.plan_type == 'free':
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "valid": False,
+                        "message": "Abonnement requis",
+                        "action": "upgrade",
+                        "redirect_url": f"{Config.BASE_URL}/connect/plans?source=looker&email={user_email}"
+                    }
+                )
+            
+            # Vérifier l'expiration de l'abonnement
+            if user.subscription_end_date and user.subscription_end_date < datetime.now().date():
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "valid": False,
+                        "message": "Abonnement expiré",
+                        "action": "renew",
+                        "redirect_url": f"{Config.BASE_URL}/connect/plans?source=looker&email={user_email}"
+                    }
+                )
+            
+            # Utilisateur valide
+            return {
+                "valid": True,
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "plan_type": user.plan_type,
+                    "platforms_accessible": get_platforms_for_plan(user.plan_type)
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Erreur check_user_looker: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_platforms_for_plan(plan_type: str) -> list:
+    """Retourner les plateformes accessibles selon le plan"""
+    plan_platforms = {
+        'linkedin_basic': ['linkedin'],
+        'facebook_basic': ['facebook'],
+        'premium': ['linkedin', 'facebook'],
+        'free': []
+    }
+    return plan_platforms.get(plan_type, [])
 
 @router.get("/looker-data", response_model=LookerDataResponse)
 async def get_looker_data(

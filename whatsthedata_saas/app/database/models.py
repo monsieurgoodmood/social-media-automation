@@ -18,6 +18,7 @@ class User(Base):
     firstname = Column(String(255))
     lastname = Column(String(255))
     email = Column(Text, unique=True, nullable=False)
+    google_id = Column(String(255), unique=True)
     company = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())

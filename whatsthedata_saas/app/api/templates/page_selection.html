@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsTheData - Sélectionnez vos pages</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 3rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        
+        .logo {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #4285f4;
+            margin-bottom: 1rem;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+        
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 3rem;
+        }
+        
+        .step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 10px;
+            font-weight: bold;
+            color: #6c757d;
+        }
+        
+        .step.active {
+            background: #4285f4;
+            color: white;
+        }
+        
+        .step.completed {
+            background: #28a745;
+            color: white;
+        }
+        
+        .platform-section {
+            margin-bottom: 2rem;
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .platform-header {
+            padding: 1rem 1.5rem;
+            background: #f8f9fa;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .platform-header.linkedin {
+            background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
+            color: white;
+        }
+        
+        .platform-header.facebook {
+            background: linear-gradient(135deg, #1877f2 0%, #166fe5 100%);
+            color: white;
+        }
+        
+        .platform-icon {
+            width: 30px;
+            height: 30px;
+            margin-right: 12px;
+        }
+        
+        .platform-name {
+            font-size: 1.3rem;
+            font-weight: bold;
+        }
+        
+        .pages-list {
+            padding: 1rem;
+        }
+        
+        .page-item {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .page-item:hover {
+            border-color: #4285f4;
+            background: #f8f9fa;
+        }
+        
+        .page-item.selected {
+            border-color: #4285f4;
+            background: #e3f2fd;
+        }
+        
+        .page-checkbox {
+            margin-right: 1rem;
+            transform: scale(1.2);
+        }
+        
+        .page-info {
+            flex: 1;
+        }
+        
+        .page-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 0.25rem;
+        }
+        
+        .page-id {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .page-stats {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.8rem;
+            color: #888;
+        }
+        
+        .no-pages {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+        
+        .no-pages-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        .continue-section {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+        }
+        
+        .selected-count {
+            margin-bottom: 1rem;
+            color: #666;
+        }
+        
+        .continue-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        .continue-btn.enabled {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        .continue-btn:hover.enabled {
+            background: #218838;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 2rem;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4285f4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .select-all {
+            text-align: right;
+            margin-bottom: 1rem;
+        }
+        
+        .select-all-btn {
+            background: none;
+            border: 1px solid #4285f4;
+            color: #4285f4;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+        
+        .select-all-btn:hover {
+            background: #4285f4;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">📊 WhatsTheData</div>
+            
+            <h1>Sélectionnez vos pages</h1>
+            <p class="subtitle">
+                Choisissez les pages et organisations que vous souhaitez analyser dans Looker Studio.
+            </p>
+            
+            <div class="step-indicator">
+                <div class="step completed">1</div>
+                <div class="step completed">2</div>
+                <div class="step completed">3</div>
+                <div class="step active">4</div>
+            </div>
+        </div>
+        
+        {% if linkedin_connected and linkedin_orgs %}
+        <div class="platform-section">
+            <div class="platform-header linkedin">
+                <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                </svg>
+                <span class="platform-name">LinkedIn - Organisations</span>
+            </div>
+            <div class="pages-list">
+                <div class="select-all">
+                    <button class="select-all-btn" onclick="selectAllLinkedIn()">Tout sélectionner</button>
+                </div>
+                {% for org in linkedin_orgs %}
+                <div class="page-item" onclick="togglePage('linkedin', '{{ org.id }}')">
+                    <input type="checkbox" class="page-checkbox linkedin-checkbox" data-id="{{ org.id }}">
+                    <div class="page-info">
+                        <div class="page-name">{{ org.name }}</div>
+                        <div class="page-id">ID: {{ org.id }}</div>
+                        <div class="page-stats">
+                            <span>📊 Analytics disponibles</span>
+                            <span>📝 Posts et engagement</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if facebook_connected and facebook_pages %}
+        <div class="platform-section">
+            <div class="platform-header facebook">
+                <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+                <span class="platform-name">Facebook - Pages</span>
+            </div>
+            <div class="pages-list">
+                <div class="select-all">
+                    <button class="select-all-btn" onclick="selectAllFacebook()">Tout sélectionner</button>
+                </div>
+                {% for page in facebook_pages %}
+                <div class="page-item" onclick="togglePage('facebook', '{{ page.id }}')">
+                    <input type="checkbox" class="page-checkbox facebook-checkbox" data-id="{{ page.id }}">
+                    <div class="page-info">
+                        <div class="page-name">{{ page.name }}</div>
+                        <div class="page-id">ID: {{ page.id }}</div>
+                        <div class="page-stats">
+                            <span>📊 Insights disponibles</span>
+                            <span>👥 Audience et engagement</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if not linkedin_connected and not facebook_connected %}
+        <div class="no-pages">
+            <div class="no-pages-icon">🔗</div>
+            <h3>Aucune plateforme connectée</h3>
+            <p>Vous devez d'abord connecter au moins une plateforme pour sélectionner vos pages.</p>
+            <a href="/connect/social?state={{ state }}" style="color: #4285f4; text-decoration: none; font-weight: bold;">← Retour aux connexions</a>
+        </div>
+        {% endif %}
+        
+        <div class="continue-section">
+            <div class="selected-count" id="selected-count">
+                Aucune page sélectionnée
+            </div>
+            
+            <button class="continue-btn" id="continue-btn" onclick="completeSetup()">
+                Finaliser la configuration
+            </button>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Génération de votre token API...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let selectedLinkedIn = [];
+        let selectedFacebook = [];
+        
+        function togglePage(platform, pageId) {
+            const checkbox = document.querySelector(`input[data-id="${pageId}"]`);
+            const pageItem = checkbox.closest('.page-item');
+            
+            checkbox.checked = !checkbox.checked;
+            
+            if (checkbox.checked) {
+                pageItem.classList.add('selected');
+                if (platform === 'linkedin') {
+                    selectedLinkedIn.push({
+                        id: pageId,
+                        name: pageItem.querySelector('.page-name').textContent
+                    });
+                } else {
+                    selectedFacebook.push({
+                        id: pageId,
+                        name: pageItem.querySelector('.page-name').textContent
+                    });
+                }
+            } else {
+                pageItem.classList.remove('selected');
+                if (platform === 'linkedin') {
+                    selectedLinkedIn = selectedLinkedIn.filter(p => p.id !== pageId);
+                } else {
+                    selectedFacebook = selectedFacebook.filter(p => p.id !== pageId);
+                }
+            }
+            
+            updateSelectedCount();
+        }
+        
+        function selectAllLinkedIn() {
+            const checkboxes = document.querySelectorAll('.linkedin-checkbox');
+            const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+            
+            checkboxes.forEach(checkbox => {
+                const pageItem = checkbox.closest('.page-item');
+                const pageId = checkbox.getAttribute('data-id');
+                const pageName = pageItem.querySelector('.page-name').textContent;
+                
+                if (!allSelected) {
+                    checkbox.checked = true;
+                    pageItem.classList.add('selected');
+                    if (!selectedLinkedIn.find(p => p.id === pageId)) {
+                        selectedLinkedIn.push({ id: pageId, name: pageName });
+                    }
+                } else {
+                    checkbox.checked = false;
+                    pageItem.classList.remove('selected');
+                    selectedLinkedIn = [];
+                }
+            });
+            
+            updateSelectedCount();
+        }
+        
+        function selectAllFacebook() {
+            const checkboxes = document.querySelectorAll('.facebook-checkbox');
+            const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+            
+            checkboxes.forEach(checkbox => {
+                const pageItem = checkbox.closest('.page-item');
+                const pageId = checkbox.getAttribute('data-id');
+                const pageName = pageItem.querySelector('.page-name').textContent;
+                
+                if (!allSelected) {
+                    checkbox.checked = true;
+                    pageItem.classList.add('selected');
+                    if (!selectedFacebook.find(p => p.id === pageId)) {
+                        selectedFacebook.push({ id: pageId, name: pageName });
+                    }
+                } else {
+                    checkbox.checked = false;
+                    pageItem.classList.remove('selected');
+                    selectedFacebook = [];
+                }
+            });
+            
+            updateSelectedCount();
+        }
+        
+        function updateSelectedCount() {
+            const total = selectedLinkedIn.length + selectedFacebook.length;
+            const countElement = document.getElementById('selected-count');
+            const continueBtn = document.getElementById('continue-btn');
+            
+            if (total === 0) {
+                countElement.textContent = 'Aucune page sélectionnée';
+                continueBtn.classList.remove('enabled');
+            } else {
+                const linkedinText = selectedLinkedIn.length > 0 ? `${selectedLinkedIn.length} LinkedIn` : '';
+                const facebookText = selectedFacebook.length > 0 ? `${selectedFacebook.length} Facebook` : '';
+                const parts = [linkedinText, facebookText].filter(Boolean);
+                
+                countElement.textContent = `${total} page${total > 1 ? 's' : ''} sélectionnée${total > 1 ? 's' : ''} (${parts.join(', ')})`;
+                continueBtn.classList.add('enabled');
+            }
+        }
+        
+        function completeSetup() {
+            if (selectedLinkedIn.length === 0 && selectedFacebook.length === 0) {
+                alert('Veuillez sélectionner au moins une page pour continuer.');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('continue-btn').style.display = 'none';
+            
+            // Envoyer la sélection au serveur
+            fetch('/connect/complete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    state: '{{ state }}',
+                    linkedin_orgs: selectedLinkedIn,
+                    facebook_pages: selectedFacebook
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Rediriger vers la page de succès avec le token
+                    window.location.href = `/connect/success?token=${encodeURIComponent(data.api_token)}&email=${encodeURIComponent(data.user_email)}&linkedin=${data.connected_platforms.linkedin}&facebook=${data.connected_platforms.facebook}`;
+                } else {
+                    alert('Erreur lors de la finalisation de la configuration');
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('continue-btn').style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Erreur de connexion');
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('continue-btn').style.display = 'block';
+            });
+        }
+    </script>
+</body>
+</html>

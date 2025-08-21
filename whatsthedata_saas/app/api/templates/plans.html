@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsTheData - Choisissez votre plan</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 3rem;
+        }
+        
+        .logo {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+        
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 2rem;
+        }
+        
+        .step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 10px;
+            font-weight: bold;
+            color: white;
+        }
+        
+        .step.active {
+            background: white;
+            color: #667eea;
+        }
+        
+        .step.completed {
+            background: #28a745;
+            color: white;
+        }
+        
+        .plans-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        
+        .plan-card {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+        }
+        
+        .plan-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        }
+        
+        .plan-card.popular {
+            border: 3px solid #4285f4;
+        }
+        
+        .popular-badge {
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4285f4;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        
+        .plan-name {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        
+        .plan-price {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #4285f4;
+            margin-bottom: 1rem;
+        }
+        
+        .plan-features {
+            list-style: none;
+            margin-bottom: 2rem;
+        }
+        
+        .plan-features li {
+            padding: 0.5rem 0;
+            color: #666;
+            position: relative;
+            padding-left: 1.5rem;
+        }
+        
+        .plan-features li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #28a745;
+            font-weight: bold;
+        }
+        
+        .plan-platforms {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .platform-badge {
+            background: #f8f9fa;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: #666;
+        }
+        
+        .platform-badge.linkedin {
+            background: #0077b5;
+            color: white;
+        }
+        
+        .platform-badge.facebook {
+            background: #1877f2;
+            color: white;
+        }
+        
+        .select-btn {
+            width: 100%;
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 1rem;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .select-btn:hover {
+            background: #3367d6;
+        }
+        
+        .user-info {
+            background: rgba(255,255,255,0.9);
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            color: white;
+            margin-top: 2rem;
+        }
+        
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">📊 WhatsTheData</div>
+            <h1>Choisissez votre plan</h1>
+            <p>Sélectionnez le plan qui correspond à vos besoins</p>
+            
+            <div class="step-indicator">
+                <div class="step completed">1</div>
+                <div class="step active">2</div>
+                <div class="step">3</div>
+                <div class="step">4</div>
+            </div>
+        </div>
+        
+        <div class="user-info">
+            <p>Connecté en tant que <strong>{{ user_name }}</strong></p>
+        </div>
+        
+        <div class="plans-grid">
+            {% for plan in plans %}
+            <div class="plan-card {% if plan.id == 'premium' %}popular{% endif %}" data-plan="{{ plan.id }}">
+                {% if plan.id == 'premium' %}
+                <div class="popular-badge">Le plus populaire</div>
+                {% endif %}
+                
+                <div class="plan-name">{{ plan.name }}</div>
+                <div class="plan-price">{{ plan.price }}</div>
+                
+                <div class="plan-platforms">
+                    {% for platform in plan.platforms %}
+                    <span class="platform-badge {{ platform }}">
+                        {% if platform == 'linkedin' %}LinkedIn{% endif %}
+                        {% if platform == 'facebook' %}Facebook{% endif %}
+                    </span>
+                    {% endfor %}
+                </div>
+                
+                <ul class="plan-features">
+                    {% for feature in plan.features %}
+                    <li>{{ feature }}</li>
+                    {% endfor %}
+                </ul>
+                
+                <button class="select-btn" onclick="selectPlan('{{ plan.id }}')">
+                    Choisir ce plan
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Traitement de votre abonnement...</p>
+        </div>
+    </div>
+    
+    <script>
+        function selectPlan(planId) {
+            // Afficher le loading
+            document.getElementById('loading').style.display = 'block';
+            document.querySelector('.plans-grid').style.display = 'none';
+            
+            // Simuler le traitement Stripe (à remplacer par vraie intégration)
+            setTimeout(() => {
+                fetch('/connect/subscribe', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        state: '{{ state }}',
+                        plan_id: planId
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.href = data.redirect;
+                    } else {
+                        alert('Erreur lors du traitement de l\'abonnement');
+                        document.getElementById('loading').style.display = 'none';
+                        document.querySelector('.plans-grid').style.display = 'grid';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Erreur de connexion');
+                    document.getElementById('loading').style.display = 'none';
+                    document.querySelector('.plans-grid').style.display = 'grid';
+                });
+            }, 2000); // Simulation délai de traitement
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsTheData - Connectez vos réseaux sociaux</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        
+        .container {
+            background: white;
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        
+        .logo {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #4285f4;
+            margin-bottom: 1rem;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+        
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 3rem;
+        }
+        
+        .step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e9ecef;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 10px;
+            font-weight: bold;
+            color: #6c757d;
+        }
+        
+        .step.active {
+            background: #4285f4;
+            color: white;
+        }
+        
+        .step.completed {
+            background: #28a745;
+            color: white;
+        }
+        
+        .platforms-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .platform-card {
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+        }
+        
+        .platform-card.linkedin {
+            border-color: #0077b5;
+            background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
+            color: white;
+        }
+        
+        .platform-card.facebook {
+            border-color: #1877f2;
+            background: linear-gradient(135deg, #1877f2 0%, #166fe5 100%);
+            color: white;
+        }
+        
+        .platform-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+        
+        .platform-icon {
+            width: 40px;
+            height: 40px;
+            margin-right: 12px;
+        }
+        
+        .platform-name {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        
+        .platform-description {
+            margin-bottom: 1.5rem;
+            opacity: 0.9;
+        }
+        
+        .connect-btn {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            transition: all 0.3s;
+        }
+        
+        .connect-btn:hover {
+            background: rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.5);
+        }
+        
+        .connect-btn.connected {
+            background: rgba(40,167,69,0.9);
+            border-color: #28a745;
+        }
+        
+        .status-indicator {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #dc3545;
+        }
+        
+        .status-indicator.connected {
+            background: #28a745;
+        }
+        
+        .continue-section {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .continue-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: background 0.3s;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        .continue-btn.enabled {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        .continue-btn:hover.enabled {
+            background: #218838;
+        }
+        
+        .requirements {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 2rem 0;
+        }
+        
+        .requirements h4 {
+            color: #495057;
+            margin-bottom: 0.5rem;
+        }
+        
+        .requirements p {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: none;
+            margin-top: 1rem;
+        }
+        
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4285f4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">📊 WhatsTheData</div>
+        
+        <h1>Connectez vos réseaux sociaux</h1>
+        <p class="subtitle">
+            Connectez-vous aux plateformes incluses dans votre abonnement pour commencer à analyser vos données.
+        </p>
+        
+        <div class="step-indicator">
+            <div class="step completed">1</div>
+            <div class="step completed">2</div>
+            <div class="step active">3</div>
+            <div class="step">4</div>
+        </div>
+        
+        <div class="requirements">
+            <h4>Bienvenue {{ user_name }} !</h4>
+            <p>Connectez au moins une plateforme pour continuer vers la sélection de vos pages.</p>
+        </div>
+        
+        <div class="platforms-container">
+            {% if 'linkedin' in platforms %}
+            <div class="platform-card linkedin" id="linkedin-card">
+                <div class="status-indicator" id="linkedin-status"></div>
+                <div class="platform-header">
+                    <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                    </svg>
+                    <span class="platform-name">LinkedIn</span>
+                </div>
+                <p class="platform-description">
+                    Connectez vos pages d'entreprise LinkedIn pour analyser les performances de vos posts et l'engagement de votre audience.
+                </p>
+                <a href="/auth/linkedin?state={{ state }}" class="connect-btn" id="linkedin-btn">
+                    <span>Connecter LinkedIn</span>
+                </a>
+            </div>
+            {% endif %}
+            
+            {% if 'facebook' in platforms %}
+            <div class="platform-card facebook" id="facebook-card">
+                <div class="status-indicator" id="facebook-status"></div>
+                <div class="platform-header">
+                    <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                    </svg>
+                    <span class="platform-name">Facebook</span>
+                </div>
+                <p class="platform-description">
+                    Connectez vos pages Facebook pour analyser vos métriques de contenu et suivre l'évolution de votre audience.
+                </p>
+                <a href="/auth/facebook?state={{ state }}" class="connect-btn" id="facebook-btn">
+                    <span>Connecter Facebook</span>
+                </a>
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="continue-section">
+            <button class="continue-btn" id="continue-btn" onclick="continueToPageSelection()">
+                Continuer vers la sélection des pages
+            </button>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Vérification des connexions...</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let connectedPlatforms = [];
+        
+        // Vérifier l'état des connexions au chargement
+        function checkConnectionStatus() {
+            // Ici on pourrait faire un appel API pour vérifier les connexions
+            // Pour le moment, on simule en fonction des paramètres URL
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            if (urlParams.get('linkedin_connected') === 'true') {
+                markPlatformConnected('linkedin');
+            }
+            
+            if (urlParams.get('facebook_connected') === 'true') {
+                markPlatformConnected('facebook');
+            }
+            
+            updateContinueButton();
+        }
+        
+        function markPlatformConnected(platform) {
+            if (!connectedPlatforms.includes(platform)) {
+                connectedPlatforms.push(platform);
+            }
+            
+            const statusIndicator = document.getElementById(platform + '-status');
+            const button = document.getElementById(platform + '-btn');
+            
+            if (statusIndicator) {
+                statusIndicator.classList.add('connected');
+            }
+            
+            if (button) {
+                button.classList.add('connected');
+                button.innerHTML = '<span>✓ Connecté</span>';
+            }
+            
+            updateContinueButton();
+        }
+        
+        function updateContinueButton() {
+            const continueBtn = document.getElementById('continue-btn');
+            
+            if (connectedPlatforms.length > 0) {
+                continueBtn.classList.add('enabled');
+            } else {
+                continueBtn.classList.remove('enabled');
+            }
+        }
+        
+        function continueToPageSelection() {
+            if (connectedPlatforms.length === 0) {
+                alert('Veuillez connecter au moins une plateforme pour continuer.');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('continue-btn').style.display = 'none';
+            
+            // Rediriger vers la sélection des pages
+            setTimeout(() => {
+                window.location.href = `/connect/pages?state={{ state }}`;
+            }, 1500);
+        }
+        
+        // Vérifier les connexions au chargement de la page
+        window.onload = checkConnectionStatus;
+        
+        // Écouter les messages de retour des pop-ups OAuth
+        window.addEventListener('message', function(event) {
+            if (event.data.type === 'oauth_success') {
+                markPlatformConnected(event.data.platform);
+            }
+        });
+    </script>
+</body>
+</html>

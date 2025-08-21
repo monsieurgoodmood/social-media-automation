@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎉 WhatsTheData - Configuration terminée !</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .success-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+            overflow: hidden;
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .success-header {
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .success-icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+            animation: bounce 1s ease-in-out;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(0);
+            }
+            40% {
+                transform: translateY(-10px);
+            }
+            60% {
+                transform: translateY(-5px);
+            }
+        }
+
+        .success-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .success-subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .success-content {
+            padding: 40px 30px;
+        }
+
+        .api-token-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 2px dashed #e0e0e0;
+        }
+
+        .api-token-label {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .api-token-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            background: white;
+            color: #333;
+            margin-bottom: 15px;
+            position: relative;
+        }
+
+        .copy-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .copy-button:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .copy-button.copied {
+            background: #4CAF50;
+        }
+
+        .instructions {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 25px;
+        }
+
+        .instructions h3 {
+            color: #1976D2;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .step {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .step-number {
+            background: #2196F3;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .step-text {
+            flex: 1;
+            line-height: 1.6;
+        }
+
+        .connected-accounts {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .account-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .account-card.linkedin {
+            border-color: #0077B5;
+            background: linear-gradient(45deg, #0077B5, #005885);
+            color: white;
+        }
+
+        .account-card.facebook {
+            border-color: #1877F2;
+            background: linear-gradient(45deg, #1877F2, #0d5fc2);
+            color: white;
+        }
+
+        .account-icon {
+            font-size: 30px;
+            margin-bottom: 10px;
+        }
+
+        .account-name {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #333;
+            border: 2px solid #e0e0e0;
+        }
+
+        .btn-secondary:hover {
+            background: #e9ecef;
+            border-color: #ccc;
+        }
+
+        .footer-info {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .footer-info a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        @media (max-width: 768px) {
+            .success-container {
+                margin: 10px;
+            }
+            
+            .success-content {
+                padding: 30px 20px;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="success-container">
+        <!-- Header de succès -->
+        <div class="success-header">
+            <div class="success-icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h1 class="success-title">Configuration terminée !</h1>
+            <p class="success-subtitle">Vos comptes sont connectés et prêts à être utilisés</p>
+        </div>
+
+        <!-- Contenu principal -->
+        <div class="success-content">
+            <!-- Token API -->
+            <div class="api-token-section">
+                <div class="api-token-label">
+                    <i class="fas fa-key"></i>
+                    Votre Token API Personnel
+                </div>
+                <input type="text" class="api-token-input" id="apiToken" value="{{ api_token }}" readonly>
+                <button class="copy-button" onclick="copyToken()">
+                    <i class="fas fa-copy"></i>
+                    <span id="copyText">Copier le token</span>
+                </button>
+            </div>
+
+            <!-- Comptes connectés -->
+            <h3 style="margin-bottom: 15px; color: #333;">
+                <i class="fas fa-link"></i> Comptes connectés
+            </h3>
+            <div class="connected-accounts">
+                {% if connected_platforms.linkedin > 0 %}
+                <div class="account-card linkedin">
+                    <div class="account-icon">
+                        <i class="fab fa-linkedin"></i>
+                    </div>
+                    <div class="account-name">LinkedIn</div>
+                    <div style="font-size: 12px; margin-top: 5px;">
+                        {{ connected_platforms.linkedin }} page(s)
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if connected_platforms.facebook > 0 %}
+                <div class="account-card facebook">
+                    <div class="account-icon">
+                        <i class="fab fa-facebook"></i>
+                    </div>
+                    <div class="account-name">Facebook</div>
+                    <div style="font-size: 12px; margin-top: 5px;">
+                        {{ connected_platforms.facebook }} page(s)
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Instructions d'utilisation -->
+            <div class="instructions">
+                <h3><i class="fas fa-chart-bar"></i> Comment utiliser votre connecteur</h3>
+                
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-text">
+                        Allez sur <strong>Looker Studio</strong> et créez un nouveau rapport
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-text">
+                        Recherchez <strong>"WhatsTheData"</strong> dans les connecteurs communautaires
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-text">
+                        Collez votre token API ci-dessus pour vous authentifier
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <div class="step-text">
+                        Configurez vos métriques (LinkedIn, Facebook, période, etc.)
+                    </div>
+                </div>
+                
+                <div class="step">
+                    <div class="step-number">5</div>
+                    <div class="step-text">
+                        Créez vos tableaux de bord avec toutes vos métriques sociales !
+                    </div>
+                </div>
+            </div>
+
+            <!-- Boutons d'action -->
+            <div class="action-buttons">
+                <a href="https://lookerstudio.google.com" class="btn btn-primary" target="_blank">
+                    <i class="fas fa-external-link-alt"></i>
+                    Ouvrir Looker Studio
+                </a>
+                <a href="mailto:support@whatsthedata.com" class="btn btn-secondary">
+                    <i class="fas fa-life-ring"></i>
+                    Besoin d'aide ?
+                </a>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer-info">
+            <p>
+                <strong>Email de connexion :</strong> {{ user_email }}<br>
+                Pour toute question : <a href="mailto:support@whatsthedata.com">support@whatsthedata.com</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function copyToken() {
+            const tokenInput = document.getElementById('apiToken');
+            const copyButton = document.querySelector('.copy-button');
+            const copyText = document.getElementById('copyText');
+            
+            // Sélectionner et copier le token
+            tokenInput.select();
+            tokenInput.setSelectionRange(0, 99999); // Pour mobile
+            
+            navigator.clipboard.writeText(tokenInput.value).then(function() {
+                // Feedback visuel
+                copyButton.classList.add('copied');
+                copyText.innerHTML = '<i class="fas fa-check"></i> Copié !';
+                
+                // Remettre le texte original après 2 secondes
+                setTimeout(function() {
+                    copyButton.classList.remove('copied');
+                    copyText.innerHTML = '<i class="fas fa-copy"></i> Copier le token';
+                }, 2000);
+            }).catch(function(err) {
+                console.error('Erreur lors de la copie:', err);
+                // Fallback pour les navigateurs plus anciens
+                document.execCommand('copy');
+                copyText.textContent = 'Copié !';
+                setTimeout(function() {
+                    copyText.textContent = 'Copier le token';
+                }, 2000);
+            });
+        }
+
+        // Animation au chargement
+        window.addEventListener('load', function() {
+            const container = document.querySelector('.success-container');
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(30px)';
+            
+            setTimeout(function() {
+                container.style.transition = 'all 0.6s ease-out';
+                container.style.opacity = '1';
+                container.style.transform = 'translateY(0)';
+            }, 100);
+        });
+
+        // Sauvegarder le token en localStorage pour faciliter l'utilisation
+        document.addEventListener('DOMContentLoaded', function() {
+            const token = document.getElementById('apiToken').value;
+            if (token) {
+                localStorage.setItem('whatsthedata_api_token', token);
+            }
+        });
+    </script>
+</body>
+</html>
