@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prêt pour Looker Studio - WhatsTheData</title>
+    <style>
+        body { font-family: Arial; padding: 40px; text-align: center; background: #f5f5f5; }
+        .container { max-width: 700px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .success { color: #22c55e; font-size: 64px; margin-bottom: 20px; }
+        .title { font-size: 28px; margin-bottom: 20px; color: #1f2937; }
+        .subtitle { color: #6b7280; margin-bottom: 30px; }
+        .config-box { background: #f9fafb; padding: 20px; margin: 20px 0; border-radius: 8px; text-align: left; }
+        .config-item { margin: 10px 0; }
+        .config-item strong { color: #1f2937; }
+        .platform-tag { display: inline-block; background: #3b82f6; color: white; padding: 4px 12px; border-radius: 16px; font-size: 12px; margin: 4px; }
+        .linkedin { background: #0077b5; }
+        .facebook { background: #1877f2; }
+        .looker-btn { 
+            background: linear-gradient(135deg, #0ea5e9, #0284c7); 
+            color: white; padding: 20px 40px; border: none; border-radius: 10px; 
+            font-size: 18px; font-weight: 600; text-decoration: none; 
+            display: inline-block; margin: 30px 0; transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(14, 165, 233, 0.3);
+        }
+        .looker-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(14, 165, 233, 0.4); }
+        .instructions { background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: left; }
+        .step { margin: 15px 0; padding: 10px 0; border-bottom: 1px solid #e5e7eb; }
+        .step:last-child { border-bottom: none; }
+        .step-number { background: #3b82f6; color: white; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; margin-right: 12px; }
+        .warning { background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 15px; margin: 20px 0; color: #92400e; }
+        .backup-link { color: #6b7280; font-size: 14px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success">✅</div>
+        <h1 class="title">Configuration terminée !</h1>
+        <p class="subtitle">Vos comptes sont connectés. Créez maintenant votre dashboard Looker Studio.</p>
+        
+        <div class="config-box">
+            <h3>Configuration actuelle :</h3>
+            <div class="config-item"><strong>Email :</strong> {{ user_email }}</div>
+            <div class="config-item"><strong>Connecteur ID :</strong> {{ connector_id }}</div>
+            <div class="config-item">
+                <strong>Plateformes :</strong>
+                {% if linkedin_page %}
+                <span class="platform-tag linkedin">LinkedIn</span>
+                {% endif %}
+                {% if facebook_page %}
+                <span class="platform-tag facebook">Facebook</span>
+                {% endif %}
+            </div>
+            
+            {% if linkedin_page %}
+            <div class="config-item"><strong>LinkedIn :</strong> {{ linkedin_page.name }} ({{ linkedin_page.id }})</div>
+            {% endif %}
+            
+            {% if facebook_page %}
+            <div class="config-item"><strong>Facebook :</strong> {{ facebook_page.name }} ({{ facebook_page.id }})</div>
+            {% endif %}
+        </div>
+        
+        <a href="{{ looker_url }}" class="looker-btn" target="_blank">
+            Ouvrir Looker Studio
+        </a>
+        
+        <div class="instructions">
+            <h3>Comment utiliser votre connecteur :</h3>
+            
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>Cliquez sur "Ouvrir Looker Studio"</strong> - Cela ouvrira une nouvelle fenêtre avec votre connecteur.
+            </div>
+            
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>Autorisez le connecteur</strong> - Looker Studio vous demandera d'autoriser l'accès à vos données.
+            </div>
+            
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>Configurez vos métriques</strong> - Choisissez les plateformes, périodes et types de données.
+            </div>
+            
+            <div class="step">
+                <span class="step-number">4</span>
+                <strong>Créez vos graphiques</strong> - Utilisez toutes vos métriques LinkedIn et Facebook pour créer vos dashboards.
+            </div>
+        </div>
+        
+        <div class="warning">
+            <strong>Important :</strong> Assurez-vous d'être connecté au même compte Google que celui utilisé pour l'abonnement.
+        </div>
+        
+        <div class="backup-link">
+            <p>Lien de sauvegarde (sans configuration) :</p>
+            <a href="{{ looker_url_simple }}" target="_blank">{{ looker_url_simple }}</a>
+        </div>
+    </div>
+    
+    <script>
+        // Tracking et feedback
+        document.querySelector('.looker-btn').addEventListener('click', function() {
+            console.log('Redirection vers Looker Studio pour:', '{{ user_email }}');
+        });
+    </script>
+</body>
+</html>

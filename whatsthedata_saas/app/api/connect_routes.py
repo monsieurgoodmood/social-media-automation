@@ -949,42 +949,48 @@ async def success_looker_page(
     connector: str = Query(...),
     pages: str = Query(...)
 ):
-    """Page de succès finale avec redirection vers Looker Studio"""
+    """Page de succès finale avec lien direct vers Looker Studio"""
     
     try:
         from urllib.parse import unquote
         pages_data = json.loads(unquote(pages))
         
         user_email = pages_data.get('email')
-        connector_id = pages_data.get('connector_id')
+        connector_id = pages_data.get('connector_id') 
         linkedin_page = pages_data.get('linkedin_page')
         facebook_page = pages_data.get('facebook_page')
         
-        # URL directe vers Looker Studio avec votre connecteur
-        looker_url = f"https://lookerstudio.google.com/datasources/create?connectorId={connector_id}"
+        # URL directe vers votre connecteur Looker Studio déployé
+        looker_url = f"https://lookerstudio.google.com/datasources/create?connectorId={connector_id}&authuser=0"
         
-        # Si vous avez un template, ajoutez-le
-        # looker_url += "&reportTemplateId=VOTRE_TEMPLATE_ID"
-        
-        # Configuration pré-remplie
+        # Configuration pré-remplie pour le connecteur
         config = {
-            "user_email": user_email,
-            "linkedin_page_id": linkedin_page.get('id') if linkedin_page else "",
-            "facebook_page_id": facebook_page.get('id') if facebook_page else ""
+            "platforms": []
         }
+        
+        if linkedin_page:
+            config["platforms"].append("linkedin")
+            config["linkedin_page_id"] = linkedin_page.get('id')
+            config["linkedin_page_name"] = linkedin_page.get('name')
+            
+        if facebook_page:
+            config["platforms"].append("facebook") 
+            config["facebook_page_id"] = facebook_page.get('id')
+            config["facebook_page_name"] = facebook_page.get('name')
         
         # Encoder la config pour l'URL
         from urllib.parse import quote
         config_encoded = quote(json.dumps(config))
         looker_url_with_config = f"{looker_url}&connectorConfig={config_encoded}"
         
-        return templates.TemplateResponse("success_looker.html", {
+        return templates.TemplateResponse("success_looker_final.html", {
             "request": request,
             "user_email": user_email,
             "linkedin_page": linkedin_page,
             "facebook_page": facebook_page,
             "connector_id": connector_id,
-            "looker_url": looker_url_with_config
+            "looker_url": looker_url_with_config,
+            "looker_url_simple": looker_url
         })
         
     except Exception as e:
