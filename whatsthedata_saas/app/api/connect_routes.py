@@ -401,7 +401,7 @@ async def linkedin_oauth_callback(
         session['linkedin_orgs'] = linkedin_organizations
         session['linkedin_connected'] = True
         
-        return RedirectResponse(f"/connect/pages?state={state}")
+        return RedirectResponse(f"{Config.BASE_URL}/connect/pages?state={state}")
         
     except Exception as e:
         return templates.TemplateResponse("error.html", {
