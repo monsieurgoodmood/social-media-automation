@@ -510,3 +510,16 @@ def get_user_tokens(session, user_id: int, platform: str):
         SocialAccessToken.platform == platform,
         SocialAccessToken.is_active == True
     ).first()
+    
+# ========================================
+# OAUTH SESSION MANAGEMENT
+# ========================================
+
+class OAuthSession(Base):
+    __tablename__ = 'oauth_sessions'
+    
+    id = Column(Integer, primary_key=True)
+    state = Column(String(64), unique=True, nullable=False, index=True)
+    data = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    expires_at = Column(DateTime, nullable=False, index=True)
