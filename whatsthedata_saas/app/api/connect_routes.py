@@ -66,31 +66,21 @@ async def google_oauth_start(request: Request):
 async def google_oauth_callback(
     request: Request,
     code: Optional[str] = Query(None),
-    state: Optional[str] = Query(None),
-    error: Optional[str] = Query(None)
+    state: Optional[str] = Query(None)
 ):
-    """Callback OAuth Google - IMPLÉMENTATION RÉELLE"""
+    """Callback OAuth Google avec logs de débogage"""
     
-    if error:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "error": f"Connexion Google annulée: {error}",
-            "retry_url": "/connect"
-        })
+    print(f"🔍 DEBUG - State reçu: {state}")
+    print(f"🔍 DEBUG - Sessions disponibles: {list(oauth_sessions.keys())}")
+    print(f"🔍 DEBUG - Code présent: {bool(code)}")
     
-    if not state or state not in oauth_sessions:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "error": "Session invalide ou expirée",
-            "retry_url": "/connect"
-        })
+    if state not in oauth_sessions:
+        print(f"❌ ERREUR - State {state} non trouvé dans les sessions")
+        # Retourner vers l'accueil avec un nouveau processus
+        return RedirectResponse("/connect")
     
-    if not code:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "error": "Code d'autorisation manquant",
-            "retry_url": "/connect"
-        })
+    session = oauth_sessions[state]
+    print(f"🔍 DEBUG - Session trouvée: {session}")
     
     session = oauth_sessions[state]
     
@@ -540,14 +530,33 @@ async def page_selection(request: Request, state: str):
     
     session = oauth_sessions[state]
     
+    # Récupérer les informations du plan
+    connector_id = session.get('connector_id')
+    plan_info = None
+
+    for stripe_id, mapping in STRIPE_TO_CONNECTOR_MAPPING.items():
+        if mapping['connector_id'] == connector_id:
+            plan_info = {
+                'name': mapping['name'],
+                'platforms': mapping['platforms'],
+                'description': mapping.get('description', '')
+            }
+            break
+
+    if not plan_info:
+        plan_info = {'name': 'Premium', 'platforms': ['linkedin', 'facebook'], 'description': ''}
+
     return templates.TemplateResponse("page_selection.html", {
-        "request": request,
-        "linkedin_orgs": session.get('linkedin_orgs', []),
-        "facebook_pages": session.get('facebook_pages', []),
-        "linkedin_connected": session.get('linkedin_connected', False),
-        "facebook_connected": session.get('facebook_connected', False),
-        "state": state
-    })
+    "request": request,
+    "plan_info": plan_info,
+    "connector_id": connector_id,  # AJOUT
+    "user_email": session.get('email'),  # AJOUT
+    "linkedin_orgs": session.get('linkedin_orgs', []),
+    "facebook_pages": session.get('facebook_pages', []),
+    "linkedin_connected": session.get('linkedin_connected', False),
+    "facebook_connected": session.get('facebook_connected', False),
+    "state": state
+})
 
 
 # Endpoints spécifiques pour Looker Studio
