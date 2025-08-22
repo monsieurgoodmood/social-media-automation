@@ -939,3 +939,57 @@ async def health_check():
 
 # Import asyncio pour sleep
 import asyncio
+
+
+# À ajouter à la fin de app/api/connect_routes.py
+
+@router.get("/connect/success-looker", response_class=HTMLResponse)
+async def success_looker_page(
+    request: Request,
+    connector: str = Query(...),
+    pages: str = Query(...)
+):
+    """Page de succès finale avec redirection vers Looker Studio"""
+    
+    try:
+        from urllib.parse import unquote
+        pages_data = json.loads(unquote(pages))
+        
+        user_email = pages_data.get('email')
+        connector_id = pages_data.get('connector_id')
+        linkedin_page = pages_data.get('linkedin_page')
+        facebook_page = pages_data.get('facebook_page')
+        
+        # URL directe vers Looker Studio avec votre connecteur
+        looker_url = f"https://lookerstudio.google.com/datasources/create?connectorId={connector_id}"
+        
+        # Si vous avez un template, ajoutez-le
+        # looker_url += "&reportTemplateId=VOTRE_TEMPLATE_ID"
+        
+        # Configuration pré-remplie
+        config = {
+            "user_email": user_email,
+            "linkedin_page_id": linkedin_page.get('id') if linkedin_page else "",
+            "facebook_page_id": facebook_page.get('id') if facebook_page else ""
+        }
+        
+        # Encoder la config pour l'URL
+        from urllib.parse import quote
+        config_encoded = quote(json.dumps(config))
+        looker_url_with_config = f"{looker_url}&connectorConfig={config_encoded}"
+        
+        return templates.TemplateResponse("success_looker.html", {
+            "request": request,
+            "user_email": user_email,
+            "linkedin_page": linkedin_page,
+            "facebook_page": facebook_page,
+            "connector_id": connector_id,
+            "looker_url": looker_url_with_config
+        })
+        
+    except Exception as e:
+        logger.error(f"Erreur success-looker: {e}")
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": "Erreur configuration finale"
+        })

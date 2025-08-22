@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configuration terminée - WhatsTheData</title>
+    <style>
+        body { font-family: Arial; padding: 40px; text-align: center; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .success { color: #22c55e; font-size: 48px; margin-bottom: 20px; }
+        .title { font-size: 28px; margin-bottom: 20px; }
+        .info { background: #f3f4f6; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        .looker-btn { 
+            background: #0ea5e9; color: white; padding: 15px 30px; 
+            border: none; border-radius: 8px; font-size: 16px; 
+            text-decoration: none; display: inline-block; margin: 20px 0;
+        }
+        .looker-btn:hover { background: #0284c7; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="success">✅</div>
+        <h1 class="title">Configuration terminée !</h1>
+        
+        <div class="info">
+            <p><strong>Utilisateur :</strong> {{ user_email }}</p>
+            <p><strong>Connecteur ID :</strong> {{ connector_id }}</p>
+            
+            {% if linkedin_page %}
+            <p><strong>LinkedIn :</strong> {{ linkedin_page.name }}</p>
+            {% endif %}
+            
+            {% if facebook_page %}
+            <p><strong>Facebook :</strong> {{ facebook_page.name }}</p>
+            {% endif %}
+        </div>
+        
+        <p>Vos comptes sont connectés. Cliquez ci-dessous pour créer votre dashboard :</p>
+        
+        <a href="{{ looker_url }}" class="looker-btn" target="_blank">
+            Ouvrir Looker Studio
+        </a>
+        
+        <p style="color: #666; font-size: 14px;">
+            Le connecteur s'ouvrira dans Looker Studio avec vos données configurées.
+        </p>
+    </div>
+</body>
+</html>
