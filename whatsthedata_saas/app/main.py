@@ -13,10 +13,11 @@ import time
 import uvicorn
 
 # Imports de vos modules
-from app.utils.config import Config, settings
+from app.utils.config import Config
 from app.database.connection import init_database, test_database_connection
 from app.api.looker_endpoints import router as looker_router
 from app.api.connect_routes import router as connect_router
+
 
 base_url = os.getenv('BASE_URL', 'https://4f71ed531c45.ngrok-free.app')
 
@@ -155,10 +156,7 @@ app.include_router(
     tags=["Looker Studio API"]
 )
 
-app.include_router(
-    connect_router,
-    tags=["OAuth & Onboarding"]
-)
+app.include_router(connect_router, prefix="")
 
 # ================================
 # 💳 WEBHOOK STRIPE
@@ -181,63 +179,6 @@ async def stripe_webhook(request: Request):
         logger.error(f"Erreur webhook Stripe: {e}")
         raise HTTPException(status_code=400, detail="Webhook error")
 
-# ================================
-# 🔗 CALLBACK OAUTH
-# ================================
-
-@app.get("/oauth/linkedin/callback")
-async def linkedin_oauth_callback(request: Request):
-    """Callback OAuth LinkedIn"""
-    try:
-        # TODO: Implémenter avec app/auth/linkedin_oauth.py
-        code = request.query_params.get("code")
-        state = request.query_params.get("state")
-        
-        if not code:
-            return RedirectResponse("http://localhost:8501?error=linkedin_auth_failed")
-        
-        logger.info(f"LinkedIn OAuth callback reçu: code={code[:10]}...")
-        
-        # Traitement du code OAuth
-        # success = linkedin_oauth.handle_callback(code, state)
-        # if success:
-        #     return RedirectResponse("http://localhost:8501?success=linkedin_connected")
-        
-        return RedirectResponse("http://localhost:8501?success=linkedin_connected")
-        
-    except Exception as e:
-        logger.error(f"Erreur callback LinkedIn: {e}")
-        return RedirectResponse("http://localhost:8501?error=linkedin_internal_error")
-
-@app.get("/oauth/facebook/callback")
-async def facebook_oauth_callback(request: Request):
-    """Callback OAuth Facebook avec récupération des pages"""
-    try:
-        from app.auth.facebook_oauth import facebook_oauth_manager
-        
-        code = request.query_params.get("code")
-        state = request.query_params.get("state")
-        
-        if not code:
-            return RedirectResponse(f"{base_url}/connect?error=facebook_auth_failed")
-        
-        # Échanger le code contre un token et récupérer les pages
-        result = facebook_oauth_manager.connect_facebook_account(
-            user_id=1,  # À remplacer par l'ID utilisateur réel
-            code=code,
-            state=state,
-            redirect_uri=f"{base_url}/oauth/facebook/callback"
-        )
-        
-        if result.get('success'):
-            return RedirectResponse(f"{base_url}/connect?success=facebook_connected")
-        else:
-            return RedirectResponse(f"{base_url}/connect?error=facebook_token_failed")
-        
-    except Exception as e:
-        logger.error(f"Erreur callback Facebook: {e}")
-        return RedirectResponse(f"{base_url}/connect?error=facebook_internal_error")
-    
     
 # ================================
 # 🧪 ROUTES DEBUG
