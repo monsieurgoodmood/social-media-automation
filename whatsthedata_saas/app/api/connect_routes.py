@@ -75,23 +75,12 @@ async def google_oauth_callback(
     print(f"🔍 DEBUG - Code présent: {bool(code)}")
     
     if state not in oauth_sessions:
-        print(f"❌ ERREUR - State {state} non trouvé dans les sessions")
-        # Retourner vers l'accueil avec un nouveau processus
-        return RedirectResponse("/connect")
-    
-    session = oauth_sessions[state]
-    print(f"🔍 DEBUG - Session trouvée: {session}")
-    
-    session = oauth_sessions[state]
-    
+    print(f"❌ ERREUR - State {state} non trouvé dans les sessions")
+    # Créer une nouvelle session au lieu de rediriger vers /connect
     try:
-        # Échanger le code contre un token d'accès
+        # Échanger quand même le code Google pour récupérer l'utilisateur
         token_data = await exchange_google_code(code)
-        
-        # Récupérer les informations utilisateur
         user_info = await get_google_user_info(token_data['access_token'])
-        
-        # Créer ou récupérer l'utilisateur en base
         user = await create_or_get_user(
             email=user_info['email'],
             firstname=user_info.get('given_name', ''),
@@ -99,22 +88,20 @@ async def google_oauth_callback(
             google_id=user_info['id']
         )
         
-        # Mettre à jour la session
-        session.update({
+        # Créer une nouvelle session
+        new_state = secrets.token_urlsafe(32)
+        oauth_sessions[new_state] = {
             'user_id': user.id,
             'user_email': user.email,
             'user_name': f"{user.firstname} {user.lastname}",
-            'step': 'plan_selection'
-        })
+            'step': 'plan_selection',
+            'provider': 'google'
+        }
         
-        return RedirectResponse(f"/connect/plans?state={state}")
+        return RedirectResponse(f"/connect/plans?state={new_state}")
         
     except Exception as e:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "error": f"Erreur lors de l'authentification Google: {str(e)}",
-            "retry_url": "/connect"
-        })
+        return RedirectResponse("/connect")
 
 async def exchange_google_code(code: str) -> dict:
     """Échanger le code d'autorisation contre un token d'accès"""
