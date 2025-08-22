@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from sqlalchemy import Column, String, DateTime, Text, Integer
+from sqlalchemy import Column, String, DateTime, Text, Integer, text
 from sqlalchemy.ext.declarative import declarative_base
 from app.database.connection import get_db_session
 
@@ -29,7 +29,7 @@ class SessionManager:
         try:
             with get_db_session() as db:
                 # Créer la table oauth_sessions si elle n'existe pas
-                db.execute("""
+                db.execute(text("""
                     CREATE TABLE IF NOT EXISTS oauth_sessions (
                         id SERIAL PRIMARY KEY,
                         state VARCHAR(64) UNIQUE NOT NULL,
@@ -37,19 +37,19 @@ class SessionManager:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         expires_at TIMESTAMP NOT NULL
                     );
-                """)
+                """))
                 
                 # Créer l'index sur state si nécessaire
-                db.execute("""
+                db.execute(text("""
                     CREATE INDEX IF NOT EXISTS idx_oauth_sessions_state 
                     ON oauth_sessions(state);
-                """)
+                """))
                 
                 # Créer l'index sur expires_at pour le nettoyage
-                db.execute("""
+                db.execute(text("""
                     CREATE INDEX IF NOT EXISTS idx_oauth_sessions_expires_at 
                     ON oauth_sessions(expires_at);
-                """)
+                """))
                 
                 db.commit()
                 logger.info("Tables OAuth sessions créées/vérifiées")
@@ -70,10 +70,10 @@ class SessionManager:
                 
                 # Créer nouvelle session avec SQL brut
                 db.execute(
-                    """
+                    text("""
                     INSERT INTO oauth_sessions (state, data, expires_at) 
                     VALUES (:state, :data, :expires_at)
-                    """,
+                    """),
                     {
                         'state': state,
                         'data': json.dumps(data, default=str),
@@ -100,10 +100,10 @@ class SessionManager:
         try:
             with get_db_session() as db:
                 result = db.execute(
-                    """
+                    text("""
                     SELECT data FROM oauth_sessions 
                     WHERE state = :state AND expires_at > :now
-                    """,
+                    """),
                     {'state': state, 'now': datetime.now()}
                 ).fetchone()
                 
@@ -129,11 +129,11 @@ class SessionManager:
         try:
             with get_db_session() as db:
                 result = db.execute(
-                    """
+                    text("""
                     UPDATE oauth_sessions 
                     SET data = :data 
                     WHERE state = :state
-                    """,
+                    """),
                     {
                         'data': json.dumps(data, default=str),
                         'state': state
@@ -161,7 +161,7 @@ class SessionManager:
         try:
             with get_db_session() as db:
                 result = db.execute(
-                    "DELETE FROM oauth_sessions WHERE state = :state",
+                    text("DELETE FROM oauth_sessions WHERE state = :state"),
                     {'state': state}
                 )
                 db.commit()
@@ -180,7 +180,7 @@ class SessionManager:
         """Nettoyer les sessions expirées"""
         try:
             result = db.execute(
-                "DELETE FROM oauth_sessions WHERE expires_at < :now",
+                text("DELETE FROM oauth_sessions WHERE expires_at < :now"),
                 {'now': datetime.now()}
             )
             
