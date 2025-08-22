@@ -39,6 +39,30 @@
             margin-bottom: 1rem;
         }
         
+        .plan-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .plan-badge.linkedin-only {
+            background: linear-gradient(135deg, #0077b5 0%, #005885 100%);
+            color: white;
+        }
+        
+        .plan-badge.facebook-only {
+            background: linear-gradient(135deg, #1877f2 0%, #166fe5 100%);
+            color: white;
+        }
+        
+        .plan-badge.premium {
+            background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%);
+            color: white;
+        }
+        
         h1 {
             color: #333;
             margin-bottom: 1rem;
@@ -49,35 +73,6 @@
             color: #666;
             margin-bottom: 2rem;
             line-height: 1.5;
-        }
-        
-        .step-indicator {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 3rem;
-        }
-        
-        .step {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: #e9ecef;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 10px;
-            font-weight: bold;
-            color: #6c757d;
-        }
-        
-        .step.active {
-            background: #4285f4;
-            color: white;
-        }
-        
-        .step.completed {
-            background: #28a745;
-            color: white;
         }
         
         .platform-section {
@@ -92,6 +87,7 @@
             background: #f8f9fa;
             display: flex;
             align-items: center;
+            justify-content: space-between;
             border-bottom: 1px solid #e9ecef;
         }
         
@@ -105,6 +101,11 @@
             color: white;
         }
         
+        .platform-title {
+            display: flex;
+            align-items: center;
+        }
+        
         .platform-icon {
             width: 30px;
             height: 30px;
@@ -114,6 +115,14 @@
         .platform-name {
             font-size: 1.3rem;
             font-weight: bold;
+        }
+        
+        .selection-type {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            background: rgba(255,255,255,0.2);
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
         }
         
         .pages-list {
@@ -141,7 +150,18 @@
             background: #e3f2fd;
         }
         
+        .page-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #f8f9fa;
+        }
+        
         .page-checkbox {
+            margin-right: 1rem;
+            transform: scale(1.2);
+        }
+        
+        .page-radio {
             margin-right: 1rem;
             transform: scale(1.2);
         }
@@ -168,15 +188,11 @@
             color: #888;
         }
         
-        .no-pages {
+        .not-available {
             text-align: center;
             padding: 2rem;
             color: #666;
-        }
-        
-        .no-pages-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
+            font-style: italic;
         }
         
         .continue-section {
@@ -235,270 +251,321 @@
             100% { transform: rotate(360deg); }
         }
         
-        .select-all {
-            text-align: right;
-            margin-bottom: 1rem;
+        .plan-info {
+            background: #f8f9fa;
+            border-left: 4px solid #4285f4;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 0 8px 8px 0;
         }
         
-        .select-all-btn {
-            background: none;
-            border: 1px solid #4285f4;
-            color: #4285f4;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.3s;
+        .plan-info h3 {
+            color: #333;
+            margin-bottom: 0.5rem;
         }
         
-        .select-all-btn:hover {
-            background: #4285f4;
-            color: white;
+        .plan-info p {
+            color: #666;
+            margin: 0;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">📊 WhatsTheData</div>
+            <div class="logo">WhatsTheData</div>
             
-            <h1>Sélectionnez vos pages</h1>
+            <!-- Badge dynamique selon l'offre -->
+            {% if plan_info.name == 'LinkedIn Only' %}
+                <div class="plan-badge linkedin-only">LinkedIn Only - 29€/mois</div>
+            {% elif plan_info.name == 'Facebook Only' %}
+                <div class="plan-badge facebook-only">Facebook Only - 29€/mois</div>
+            {% else %}
+                <div class="plan-badge premium">Premium - LinkedIn + Facebook - 49€/mois</div>
+            {% endif %}
+            
+            <h1>Sélectionnez vos pages pour Looker Studio</h1>
             <p class="subtitle">
-                Choisissez les pages et organisations que vous souhaitez analyser dans Looker Studio.
+                {% if plan_info.name == 'LinkedIn Only' %}
+                    Choisissez UNE organisation LinkedIn à analyser dans votre dashboard.
+                {% elif plan_info.name == 'Facebook Only' %}
+                    Choisissez UNE page Facebook à analyser dans votre dashboard.
+                {% else %}
+                    Choisissez UNE page par plateforme pour votre dashboard unifié.
+                {% endif %}
             </p>
-            
-            <div class="step-indicator">
-                <div class="step completed">1</div>
-                <div class="step completed">2</div>
-                <div class="step completed">3</div>
-                <div class="step active">4</div>
-            </div>
+        </div>
+
+        <!-- Info plan -->
+        <div class="plan-info">
+            <h3>{{ plan_info.name }}</h3>
+            <p>{{ plan_info.description }}</p>
         </div>
         
-        {% if linkedin_connected and linkedin_orgs %}
+        <!-- Section LinkedIn (si applicable) -->
+        {% if 'linkedin' in plan_info.platforms %}
         <div class="platform-section">
             <div class="platform-header linkedin">
-                <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-                </svg>
-                <span class="platform-name">LinkedIn - Organisations</span>
-            </div>
-            <div class="pages-list">
-                <div class="select-all">
-                    <button class="select-all-btn" onclick="selectAllLinkedIn()">Tout sélectionner</button>
+                <div class="platform-title">
+                    <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                    </svg>
+                    <span class="platform-name">LinkedIn - Organisations</span>
                 </div>
+                <div class="selection-type">
+                    {% if plan_info.name == 'Premium' %}
+                        Sélection unique
+                    {% else %}
+                        Votre plateforme
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if linkedin_connected and linkedin_orgs %}
+            <div class="pages-list">
                 {% for org in linkedin_orgs %}
-                <div class="page-item" onclick="togglePage('linkedin', '{{ org.id }}')">
-                    <input type="checkbox" class="page-checkbox linkedin-checkbox" data-id="{{ org.id }}">
+                <div class="page-item" onclick="selectLinkedInPage('{{ org.id }}', '{{ org.name }}')">
+                    <input type="radio" name="linkedin_selection" class="page-radio" data-id="{{ org.id }}">
                     <div class="page-info">
                         <div class="page-name">{{ org.name }}</div>
                         <div class="page-id">ID: {{ org.id }}</div>
                         <div class="page-stats">
-                            <span>📊 Analytics disponibles</span>
-                            <span>📝 Posts et engagement</span>
+                            <span>Analytics disponibles</span>
+                            <span>Posts et engagement</span>
                         </div>
                     </div>
                 </div>
                 {% endfor %}
             </div>
+            {% else %}
+            <div class="not-available">
+                {% if not linkedin_connected %}
+                    <p>Connectez-vous d'abord à LinkedIn pour voir vos organisations</p>
+                    <a href="/auth/linkedin?state={{ state }}" style="color: #0077b5; font-weight: bold;">Se connecter à LinkedIn</a>
+                {% else %}
+                    <p>Aucune organisation LinkedIn trouvée</p>
+                {% endif %}
+            </div>
+            {% endif %}
         </div>
         {% endif %}
         
-        {% if facebook_connected and facebook_pages %}
+        <!-- Section Facebook (si applicable) -->
+        {% if 'facebook' in plan_info.platforms %}
         <div class="platform-section">
             <div class="platform-header facebook">
-                <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                </svg>
-                <span class="platform-name">Facebook - Pages</span>
-            </div>
-            <div class="pages-list">
-                <div class="select-all">
-                    <button class="select-all-btn" onclick="selectAllFacebook()">Tout sélectionner</button>
+                <div class="platform-title">
+                    <svg class="platform-icon" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                    </svg>
+                    <span class="platform-name">Facebook - Pages</span>
                 </div>
+                <div class="selection-type">
+                    {% if plan_info.name == 'Premium' %}
+                        Sélection unique
+                    {% else %}
+                        Votre plateforme
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if facebook_connected and facebook_pages %}
+            <div class="pages-list">
                 {% for page in facebook_pages %}
-                <div class="page-item" onclick="togglePage('facebook', '{{ page.id }}')">
-                    <input type="checkbox" class="page-checkbox facebook-checkbox" data-id="{{ page.id }}">
+                <div class="page-item" onclick="selectFacebookPage('{{ page.id }}', '{{ page.name }}')">
+                    <input type="radio" name="facebook_selection" class="page-radio" data-id="{{ page.id }}">
                     <div class="page-info">
                         <div class="page-name">{{ page.name }}</div>
-                        <div class="page-id">ID: {{ page.id }}</div>
+                        <div class="page-id">{{ page.category }} - ID: {{ page.id }}</div>
                         <div class="page-stats">
-                            <span>📊 Insights disponibles</span>
-                            <span>👥 Audience et engagement</span>
+                            <span>Insights disponibles</span>
+                            <span>Audience et engagement</span>
                         </div>
                     </div>
                 </div>
                 {% endfor %}
             </div>
-        </div>
-        {% endif %}
-        
-        {% if not linkedin_connected and not facebook_connected %}
-        <div class="no-pages">
-            <div class="no-pages-icon">🔗</div>
-            <h3>Aucune plateforme connectée</h3>
-            <p>Vous devez d'abord connecter au moins une plateforme pour sélectionner vos pages.</p>
-            <a href="/connect/social?state={{ state }}" style="color: #4285f4; text-decoration: none; font-weight: bold;">← Retour aux connexions</a>
+            {% else %}
+            <div class="not-available">
+                {% if not facebook_connected %}
+                    <p>Connectez-vous d'abord à Facebook pour voir vos pages</p>
+                    <a href="/auth/facebook?state={{ state }}" style="color: #1877f2; font-weight: bold;">Se connecter à Facebook</a>
+                {% else %}
+                    <p>Aucune page Facebook trouvée</p>
+                {% endif %}
+            </div>
+            {% endif %}
         </div>
         {% endif %}
         
         <div class="continue-section">
             <div class="selected-count" id="selected-count">
-                Aucune page sélectionnée
+                {% if plan_info.name == 'LinkedIn Only' %}
+                    Sélectionnez une organisation LinkedIn
+                {% elif plan_info.name == 'Facebook Only' %}
+                    Sélectionnez une page Facebook
+                {% else %}
+                    Sélectionnez une page par plateforme
+                {% endif %}
             </div>
             
-            <button class="continue-btn" id="continue-btn" onclick="completeSetup()">
-                Finaliser la configuration
+            <button class="continue-btn" id="continue-btn" onclick="validateSelection()">
+                Créer mon dashboard Looker Studio
             </button>
             
             <div class="loading" id="loading">
                 <div class="spinner"></div>
-                <p>Génération de votre token API...</p>
+                <p>Configuration de votre connecteur...</p>
             </div>
         </div>
     </div>
     
     <script>
-        let selectedLinkedIn = [];
-        let selectedFacebook = [];
+        let selectedLinkedIn = null;
+        let selectedFacebook = null;
+        const planType = '{{ plan_info.name }}';
+        const requiredPlatforms = {{ plan_info.platforms | tojson }};
         
-        function togglePage(platform, pageId) {
-            const checkbox = document.querySelector(`input[data-id="${pageId}"]`);
-            const pageItem = checkbox.closest('.page-item');
+        function selectLinkedInPage(id, name) {
+            // Désélectionner toutes les autres pages LinkedIn
+            document.querySelectorAll('input[name="linkedin_selection"]').forEach(radio => {
+                radio.checked = false;
+                radio.closest('.page-item').classList.remove('selected');
+            });
             
-            checkbox.checked = !checkbox.checked;
+            // Sélectionner la page choisie
+            const selectedRadio = document.querySelector(`input[name="linkedin_selection"][data-id="${id}"]`);
+            selectedRadio.checked = true;
+            selectedRadio.closest('.page-item').classList.add('selected');
             
-            if (checkbox.checked) {
-                pageItem.classList.add('selected');
-                if (platform === 'linkedin') {
-                    selectedLinkedIn.push({
-                        id: pageId,
-                        name: pageItem.querySelector('.page-name').textContent
-                    });
-                } else {
-                    selectedFacebook.push({
-                        id: pageId,
-                        name: pageItem.querySelector('.page-name').textContent
-                    });
-                }
-            } else {
-                pageItem.classList.remove('selected');
-                if (platform === 'linkedin') {
-                    selectedLinkedIn = selectedLinkedIn.filter(p => p.id !== pageId);
-                } else {
-                    selectedFacebook = selectedFacebook.filter(p => p.id !== pageId);
-                }
-            }
-            
+            selectedLinkedIn = { id: id, name: name };
             updateSelectedCount();
         }
         
-        function selectAllLinkedIn() {
-            const checkboxes = document.querySelectorAll('.linkedin-checkbox');
-            const allSelected = Array.from(checkboxes).every(cb => cb.checked);
-            
-            checkboxes.forEach(checkbox => {
-                const pageItem = checkbox.closest('.page-item');
-                const pageId = checkbox.getAttribute('data-id');
-                const pageName = pageItem.querySelector('.page-name').textContent;
-                
-                if (!allSelected) {
-                    checkbox.checked = true;
-                    pageItem.classList.add('selected');
-                    if (!selectedLinkedIn.find(p => p.id === pageId)) {
-                        selectedLinkedIn.push({ id: pageId, name: pageName });
-                    }
-                } else {
-                    checkbox.checked = false;
-                    pageItem.classList.remove('selected');
-                    selectedLinkedIn = [];
-                }
+        function selectFacebookPage(id, name) {
+            // Désélectionner toutes les autres pages Facebook
+            document.querySelectorAll('input[name="facebook_selection"]').forEach(radio => {
+                radio.checked = false;
+                radio.closest('.page-item').classList.remove('selected');
             });
             
-            updateSelectedCount();
-        }
-        
-        function selectAllFacebook() {
-            const checkboxes = document.querySelectorAll('.facebook-checkbox');
-            const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+            // Sélectionner la page choisie
+            const selectedRadio = document.querySelector(`input[name="facebook_selection"][data-id="${id}"]`);
+            selectedRadio.checked = true;
+            selectedRadio.closest('.page-item').classList.add('selected');
             
-            checkboxes.forEach(checkbox => {
-                const pageItem = checkbox.closest('.page-item');
-                const pageId = checkbox.getAttribute('data-id');
-                const pageName = pageItem.querySelector('.page-name').textContent;
-                
-                if (!allSelected) {
-                    checkbox.checked = true;
-                    pageItem.classList.add('selected');
-                    if (!selectedFacebook.find(p => p.id === pageId)) {
-                        selectedFacebook.push({ id: pageId, name: pageName });
-                    }
-                } else {
-                    checkbox.checked = false;
-                    pageItem.classList.remove('selected');
-                    selectedFacebook = [];
-                }
-            });
-            
+            selectedFacebook = { id: id, name: name };
             updateSelectedCount();
         }
         
         function updateSelectedCount() {
-            const total = selectedLinkedIn.length + selectedFacebook.length;
             const countElement = document.getElementById('selected-count');
             const continueBtn = document.getElementById('continue-btn');
             
-            if (total === 0) {
-                countElement.textContent = 'Aucune page sélectionnée';
-                continueBtn.classList.remove('enabled');
-            } else {
-                const linkedinText = selectedLinkedIn.length > 0 ? `${selectedLinkedIn.length} LinkedIn` : '';
-                const facebookText = selectedFacebook.length > 0 ? `${selectedFacebook.length} Facebook` : '';
-                const parts = [linkedinText, facebookText].filter(Boolean);
+            let isValid = false;
+            let message = '';
+            
+            if (planType === 'LinkedIn Only') {
+                isValid = selectedLinkedIn !== null;
+                message = selectedLinkedIn ? 
+                    `LinkedIn: ${selectedLinkedIn.name}` : 
+                    'Sélectionnez une organisation LinkedIn';
+            } else if (planType === 'Facebook Only') {
+                isValid = selectedFacebook !== null;
+                message = selectedFacebook ? 
+                    `Facebook: ${selectedFacebook.name}` : 
+                    'Sélectionnez une page Facebook';
+            } else { // Premium
+                const hasLinkedIn = selectedLinkedIn !== null;
+                const hasFacebook = selectedFacebook !== null;
+                isValid = hasLinkedIn && hasFacebook;
                 
-                countElement.textContent = `${total} page${total > 1 ? 's' : ''} sélectionnée${total > 1 ? 's' : ''} (${parts.join(', ')})`;
+                if (hasLinkedIn && hasFacebook) {
+                    message = `LinkedIn: ${selectedLinkedIn.name} | Facebook: ${selectedFacebook.name}`;
+                } else if (hasLinkedIn) {
+                    message = `LinkedIn: ${selectedLinkedIn.name} | Sélectionnez une page Facebook`;
+                } else if (hasFacebook) {
+                    message = `Facebook: ${selectedFacebook.name} | Sélectionnez une organisation LinkedIn`;
+                } else {
+                    message = 'Sélectionnez une page par plateforme';
+                }
+            }
+            
+            countElement.textContent = message;
+            
+            if (isValid) {
                 continueBtn.classList.add('enabled');
+            } else {
+                continueBtn.classList.remove('enabled');
             }
         }
         
-        function completeSetup() {
-            if (selectedLinkedIn.length === 0 && selectedFacebook.length === 0) {
-                alert('Veuillez sélectionner au moins une page pour continuer.');
+        async function validateSelection() {
+            let isValid = false;
+            
+            if (planType === 'LinkedIn Only') {
+                isValid = selectedLinkedIn !== null;
+            } else if (planType === 'Facebook Only') {
+                isValid = selectedFacebook !== null;
+            } else { // Premium
+                isValid = selectedLinkedIn !== null && selectedFacebook !== null;
+            }
+            
+            if (!isValid) {
+                alert('Veuillez effectuer la sélection requise avant de continuer.');
                 return;
             }
             
             document.getElementById('loading').style.display = 'block';
             document.getElementById('continue-btn').style.display = 'none';
             
-            // Envoyer la sélection au serveur
-            fetch('/connect/complete', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    state: '{{ state }}',
-                    linkedin_orgs: selectedLinkedIn,
-                    facebook_pages: selectedFacebook
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Rediriger vers la page de succès avec le token
-                    window.location.href = `/connect/success?token=${encodeURIComponent(data.api_token)}&email=${encodeURIComponent(data.user_email)}&linkedin=${data.connected_platforms.linkedin}&facebook=${data.connected_platforms.facebook}`;
+            try {
+                // Sauvegarder la sélection via l'API
+                const response = await fetch('/connect/looker/save-selection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        state: '{{ state }}',
+                        linkedin_page_id: selectedLinkedIn?.id,
+                        facebook_page_id: selectedFacebook?.id,
+                        connector_id: '{{ connector_id }}'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Simuler le retour vers Looker Studio
+                    const returnData = {
+                        code: 'success_{{ state }}',
+                        state: '{{ state }}',
+                        email: '{{ user_email }}',
+                        connector_id: '{{ connector_id }}',
+                        linkedin_page: selectedLinkedIn,
+                        facebook_page: selectedFacebook
+                    };
+                    
+                    // Message vers la fenêtre parent (Looker Studio)
+                    if (window.parent !== window) {
+                        window.parent.postMessage(returnData, '*');
+                    }
+                    
+                    // Redirection alternative si pas dans iframe
+                    setTimeout(() => {
+                        window.location.href = '/connect/success-looker?connector={{ connector_id }}&pages=' + 
+                            encodeURIComponent(JSON.stringify(returnData));
+                    }, 1000);
+                    
                 } else {
-                    alert('Erreur lors de la finalisation de la configuration');
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('continue-btn').style.display = 'block';
+                    throw new Error(result.error || 'Erreur lors de la sauvegarde');
                 }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Erreur de connexion');
+                
+            } catch (error) {
+                console.error('Erreur:', error);
+                alert('Erreur lors de la configuration. Veuillez réessayer.');
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('continue-btn').style.display = 'block';
-            });
+            }
         }
     </script>
 </body>

@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from ..database.connection import get_db_session
 from ..database.models import User, LinkedinAccount, FacebookAccount
 from ..utils.config import Config
+from app.utils.connector_mapping import STRIPE_TO_CONNECTOR_MAPPING
 
 router = APIRouter(tags=["OAuth & Onboarding"])
 templates = Jinja2Templates(directory="app/api/templates")
@@ -203,27 +204,24 @@ async def plan_selection(request: Request, state: str):
     
     plans = [
         {
-            'id': 'linkedin_basic',
-            'name': 'LinkedIn Basic',
-            'price': '€29/mois',
-            'stripe_price_id': 'price_linkedin_basic',  # À remplacer par vos vrais IDs Stripe
-            'features': ['Analytics LinkedIn', 'Export Looker Studio', 'Support email'],
+            'id': 'price_1Ryho8JoIj8R31C3EXMDQ9tY',
+            'name': 'LinkedIn Only',
+            'price': '29€/mois',
+            'features': ['Analytics LinkedIn complètes', 'Métriques posts et pages', 'Export Looker Studio'],
             'platforms': ['linkedin']
         },
         {
-            'id': 'facebook_basic', 
-            'name': 'Facebook Basic',
-            'price': '€29/mois',
-            'stripe_price_id': 'price_facebook_basic',
-            'features': ['Analytics Facebook', 'Export Looker Studio', 'Support email'],
+            'id': 'price_1RyhoWJoIj8R31C3uiSRLcw8', 
+            'name': 'Facebook Only',
+            'price': '29€/mois',
+            'features': ['Analytics Facebook complètes', 'Métriques posts et pages', 'Export Looker Studio'],
             'platforms': ['facebook']
         },
         {
-            'id': 'premium',
-            'name': 'Premium',
-            'price': '€49/mois',
-            'stripe_price_id': 'price_premium',
-            'features': ['LinkedIn + Facebook', 'Analytics avancées', 'API access', 'Support prioritaire'],
+            'id': 'price_1RyhpiJoIj8R31C3EmVclb8P',
+            'name': 'LinkedIn + Facebook',
+            'price': '49€/mois',
+            'features': ['LinkedIn + Facebook', 'Analytics cross-platform', 'Dashboard unifié', 'Support prioritaire'],
             'platforms': ['linkedin', 'facebook']
         }
     ]
@@ -259,16 +257,15 @@ async def process_subscription(request: Request):
             user.subscription_end_date = datetime.now() + timedelta(days=30)
             db_session.commit()
     
-    # Déterminer les plateformes à connecter
-    plan_platforms = {
-        'linkedin_basic': ['linkedin'],
-        'facebook_basic': ['facebook'],
-        'premium': ['linkedin', 'facebook']
-    }
-    
+    # Récupérer les informations du plan depuis le mapping
+    plan_info = STRIPE_TO_CONNECTOR_MAPPING.get(plan_id)
+    if not plan_info:
+        raise HTTPException(status_code=400, detail="Plan invalide")
+
     session.update({
         'plan_id': plan_id,
-        'platforms_to_connect': plan_platforms.get(plan_id, []),
+        'connector_id': plan_info['connector_id'],
+        'platforms_to_connect': plan_info['platforms'],
         'step': 'social_connect'
     })
     
@@ -551,6 +548,168 @@ async def page_selection(request: Request, state: str):
         "facebook_connected": session.get('facebook_connected', False),
         "state": state
     })
+
+
+# Endpoints spécifiques pour Looker Studio
+@router.get("/connect/oauth/start")
+async def looker_oauth_start(
+    source: str = Query("looker"),
+    email: str = Query(...),
+    connector: str = Query(...)
+):
+    """Point d'entrée OAuth depuis Looker Studio"""
+    
+    # Vérifier l'abonnement pour ce connecteur
+    with get_db_session() as db_session:
+        user = db_session.query(User).filter(User.email == email).first()
+        
+        if not user:
+            # Rediriger vers inscription avec préservation du contexte
+            state = secrets.token_urlsafe(32)
+            oauth_sessions[state] = {
+                'source': 'looker',
+                'email': email,
+                'connector_id': connector,
+                'step': 'registration_needed'
+            }
+            return RedirectResponse(f"/connect?looker_state={state}")
+        
+        # Vérifier si l'utilisateur a l'abonnement requis pour ce connecteur
+        plan_info = None
+        for stripe_id, mapping in STRIPE_TO_CONNECTOR_MAPPING.items():
+            if mapping['connector_id'] == connector:
+                plan_info = mapping
+                break
+        
+        if not plan_info or user.plan_type != plan_info['stripe_price_id']:
+            # Rediriger vers upgrade
+            return RedirectResponse(f"/connect/upgrade?email={email}&connector={connector}")
+    
+    # Créer session OAuth pour sélection de pages
+    state = secrets.token_urlsafe(32)
+    oauth_sessions[state] = {
+        'source': 'looker',
+        'email': email,
+        'user_id': user.id,
+        'connector_id': connector,
+        'platforms': plan_info['platforms'],
+        'step': 'page_selection'
+    }
+    
+    # Rediriger vers sélection des plateformes
+    return RedirectResponse(f"/connect/looker/select?state={state}")
+
+@router.get("/connect/looker/select", response_class=HTMLResponse)
+async def looker_page_selection(request: Request, state: str):
+    """Interface de sélection des pages pour Looker Studio avec info du plan"""
+    
+    if state not in oauth_sessions:
+        return RedirectResponse("/connect")
+    
+    session = oauth_sessions[state]
+    connector_id = session.get('connector_id')
+    
+    # Récupérer les informations du plan depuis le mapping
+    plan_info = None
+    for stripe_id, mapping in STRIPE_TO_CONNECTOR_MAPPING.items():
+        if mapping['connector_id'] == connector_id:
+            plan_info = {
+                'name': mapping['name'],
+                'platforms': mapping['platforms'],
+                'description': mapping.get('description', '')
+            }
+            break
+    
+    if not plan_info:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": "Configuration du connecteur introuvable"
+        })
+    
+    return templates.TemplateResponse("looker_page_selection.html", {
+        "request": request,
+        "plan_info": plan_info,
+        "platforms": plan_info['platforms'],
+        "state": state,
+        "connector_id": connector_id,
+        "user_email": session.get('email'),
+        "linkedin_orgs": session.get('linkedin_orgs', []),
+        "facebook_pages": session.get('facebook_pages', []),
+        "linkedin_connected": session.get('linkedin_connected', False),
+        "facebook_connected": session.get('facebook_connected', False)
+    })
+    
+    
+@router.post("/connect/oauth/callback")
+async def looker_oauth_callback(request: Request):
+    """Callback pour Looker Studio après sélection des pages"""
+    
+    data = await request.json()
+    code = data.get('code')  # Code simulé après sélection
+    state = data.get('state')
+    email = data.get('email')
+    connector_id = data.get('connector_id')
+    
+    if state not in oauth_sessions:
+        return {"success": False, "error": "Session invalide"}
+    
+    session = oauth_sessions[state]
+    
+    # Récupérer les pages sélectionnées depuis la session
+    linkedin_page = session.get('selected_linkedin_page')
+    facebook_page = session.get('selected_facebook_page')
+    
+    if not linkedin_page and not facebook_page:
+        return {"success": False, "error": "Aucune page sélectionnée"}
+    
+    # Nettoyer la session
+    del oauth_sessions[state]
+    
+    return {
+        "success": True,
+        "linkedin_page": linkedin_page,
+        "facebook_page": facebook_page,
+        "email": email,
+        "connector_id": connector_id
+    }
+
+@router.post("/connect/looker/save-selection")
+async def save_page_selection(request: Request):
+    """Sauvegarder la sélection de pages pour Looker"""
+    
+    data = await request.json()
+    state = data.get('state')
+    linkedin_page_id = data.get('linkedin_page_id')
+    facebook_page_id = data.get('facebook_page_id')
+    
+    if state not in oauth_sessions:
+        return {"success": False, "error": "Session invalide"}
+    
+    session = oauth_sessions[state]
+    
+    # Sauvegarder les sélections dans la session
+    if linkedin_page_id:
+        # Trouver les détails de la page LinkedIn
+        linkedin_orgs = session.get('linkedin_orgs', [])
+        selected_org = next((org for org in linkedin_orgs if org['id'] == linkedin_page_id), None)
+        if selected_org:
+            session['selected_linkedin_page'] = {
+                'id': selected_org['id'],
+                'name': selected_org['name']
+            }
+    
+    if facebook_page_id:
+        # Trouver les détails de la page Facebook
+        facebook_pages = session.get('facebook_pages', [])
+        selected_page = next((page for page in facebook_pages if page['id'] == facebook_page_id), None)
+        if selected_page:
+            session['selected_facebook_page'] = {
+                'id': selected_page['id'],
+                'name': selected_page['name']
+            }
+    
+    return {"success": True, "message": "Sélection sauvegardée"}
+
 
 @router.post("/connect/complete")
 async def complete_onboarding(request: Request):

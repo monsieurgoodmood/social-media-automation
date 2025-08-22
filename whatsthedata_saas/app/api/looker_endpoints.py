@@ -231,17 +231,37 @@ async def check_user_looker(request: Request):
     try:
         data = await request.json()
         user_email = data.get('email')
+        connector_id = data.get('connector_id')  # Nouveau paramètre
         source = data.get('source', 'looker_studio')
         
         if not user_email:
             raise HTTPException(status_code=400, detail="Email manquant")
+        
+        # Import du mapping
+        from app.utils.connector_mapping import STRIPE_TO_CONNECTOR_MAPPING
+        
+        # Trouver le plan correspondant au connecteur
+        user_plan_info = None
+        for price_id, plan_info in STRIPE_TO_CONNECTOR_MAPPING.items():
+            if plan_info['connector_id'] == connector_id:
+                user_plan_info = plan_info
+                break
+        
+        if not user_plan_info:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "valid": False,
+                    "error": "Connecteur invalide",
+                    "message": "Ce connecteur n'est pas reconnu"
+                }
+            )
         
         # Récupérer l'utilisateur par email
         with db_manager.get_session() as session:
             user = session.query(User).filter(User.email == user_email).first()
             
             if not user:
-                # Utilisateur n'existe pas - besoin d'inscription
                 return JSONResponse(
                     status_code=404,
                     content={
@@ -262,13 +282,13 @@ async def check_user_looker(request: Request):
                     }
                 )
             
-            # Vérifier l'abonnement
-            if user.plan_type == 'free':
+            # Vérifier que l'utilisateur a le bon plan pour ce connecteur
+            if user.plan_type != user_plan_info['price_id']:
                 return JSONResponse(
                     status_code=403,
                     content={
                         "valid": False,
-                        "message": "Abonnement requis",
+                        "message": f"Plan incompatible. Ce connecteur nécessite: {user_plan_info['name']}",
                         "action": "upgrade",
                         "redirect_url": f"{Config.BASE_URL}/connect/plans?source=looker&email={user_email}"
                     }
@@ -293,7 +313,8 @@ async def check_user_looker(request: Request):
                     "id": user.id,
                     "email": user.email,
                     "plan_type": user.plan_type,
-                    "platforms_accessible": get_platforms_for_plan(user.plan_type)
+                    "plan_name": user_plan_info['name'],
+                    "platforms_accessible": user_plan_info['platforms']
                 }
             }
             
