@@ -4,10 +4,9 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
-from sqlalchemy import Column, String, DateTime, Text, Integer, create_engine
+from sqlalchemy import Column, String, DateTime, Text, Integer
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from app.database.connection import get_db_session, engine
+from app.database.connection import get_db_session
 
 logger = logging.getLogger(__name__)
 Base = declarative_base()
@@ -28,10 +27,35 @@ class SessionManager:
     def init_tables():
         """Créer les tables si elles n'existent pas"""
         try:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Tables OAuth sessions créées/vérifiées")
+            with get_db_session() as db:
+                # Créer la table oauth_sessions si elle n'existe pas
+                db.execute("""
+                    CREATE TABLE IF NOT EXISTS oauth_sessions (
+                        id SERIAL PRIMARY KEY,
+                        state VARCHAR(64) UNIQUE NOT NULL,
+                        data TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        expires_at TIMESTAMP NOT NULL
+                    );
+                """)
+                
+                # Créer l'index sur state si nécessaire
+                db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_oauth_sessions_state 
+                    ON oauth_sessions(state);
+                """)
+                
+                # Créer l'index sur expires_at pour le nettoyage
+                db.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_oauth_sessions_expires_at 
+                    ON oauth_sessions(expires_at);
+                """)
+                
+                db.commit()
+                logger.info("Tables OAuth sessions créées/vérifiées")
         except Exception as e:
             logger.error(f"Erreur création tables OAuth: {e}")
+            # Ne pas faire planter l'app si les tables existent déjà
     
     @staticmethod
     def create_session(data: Dict[Any, Any], expires_minutes: int = 30) -> str:
@@ -44,13 +68,18 @@ class SessionManager:
                 # Nettoyer les sessions expirées d'abord
                 SessionManager._cleanup_expired_sessions(db)
                 
-                # Créer nouvelle session
-                session = OAuthSession(
-                    state=state,
-                    data=json.dumps(data, default=str),  # default=str pour datetime
-                    expires_at=expires_at
+                # Créer nouvelle session avec SQL brut
+                db.execute(
+                    """
+                    INSERT INTO oauth_sessions (state, data, expires_at) 
+                    VALUES (:state, :data, :expires_at)
+                    """,
+                    {
+                        'state': state,
+                        'data': json.dumps(data, default=str),
+                        'expires_at': expires_at
+                    }
                 )
-                db.add(session)
                 db.commit()
                 
                 logger.info(f"Session OAuth créée: {state[:8]}...")
@@ -70,16 +99,19 @@ class SessionManager:
             
         try:
             with get_db_session() as db:
-                session = db.query(OAuthSession).filter(
-                    OAuthSession.state == state,
-                    OAuthSession.expires_at > datetime.now()
-                ).first()
+                result = db.execute(
+                    """
+                    SELECT data FROM oauth_sessions 
+                    WHERE state = :state AND expires_at > :now
+                    """,
+                    {'state': state, 'now': datetime.now()}
+                ).fetchone()
                 
-                if not session:
+                if not result:
                     logger.warning(f"Session OAuth non trouvée ou expirée: {state[:8]}...")
                     return None
                     
-                data = json.loads(session.data)
+                data = json.loads(result[0])
                 logger.info(f"Session OAuth récupérée: {state[:8]}...")
                 return data
                 
@@ -96,19 +128,25 @@ class SessionManager:
             
         try:
             with get_db_session() as db:
-                session = db.query(OAuthSession).filter(
-                    OAuthSession.state == state
-                ).first()
-                
-                if not session:
-                    logger.warning(f"Session OAuth à updater non trouvée: {state[:8]}...")
-                    return False
-                    
-                session.data = json.dumps(data, default=str)
+                result = db.execute(
+                    """
+                    UPDATE oauth_sessions 
+                    SET data = :data 
+                    WHERE state = :state
+                    """,
+                    {
+                        'data': json.dumps(data, default=str),
+                        'state': state
+                    }
+                )
                 db.commit()
                 
-                logger.info(f"Session OAuth mise à jour: {state[:8]}...")
-                return True
+                if result.rowcount > 0:
+                    logger.info(f"Session OAuth mise à jour: {state[:8]}...")
+                    return True
+                else:
+                    logger.warning(f"Session OAuth à updater non trouvée: {state[:8]}...")
+                    return False
                 
         except Exception as e:
             logger.error(f"Erreur update session OAuth {state[:8]}...: {e}")
@@ -122,14 +160,16 @@ class SessionManager:
             
         try:
             with get_db_session() as db:
-                deleted = db.query(OAuthSession).filter(
-                    OAuthSession.state == state
-                ).delete()
+                result = db.execute(
+                    "DELETE FROM oauth_sessions WHERE state = :state",
+                    {'state': state}
+                )
                 db.commit()
                 
-                if deleted:
+                if result.rowcount > 0:
                     logger.info(f"Session OAuth supprimée: {state[:8]}...")
-                return deleted > 0
+                    return True
+                return False
                 
         except Exception as e:
             logger.error(f"Erreur suppression session OAuth {state[:8]}...: {e}")
@@ -139,12 +179,13 @@ class SessionManager:
     def _cleanup_expired_sessions(db):
         """Nettoyer les sessions expirées"""
         try:
-            deleted = db.query(OAuthSession).filter(
-                OAuthSession.expires_at < datetime.now()
-            ).delete()
+            result = db.execute(
+                "DELETE FROM oauth_sessions WHERE expires_at < :now",
+                {'now': datetime.now()}
+            )
             
-            if deleted > 0:
-                logger.info(f"Sessions expirées nettoyées: {deleted}")
+            if result.rowcount > 0:
+                logger.info(f"Sessions expirées nettoyées: {result.rowcount}")
                 
         except Exception as e:
             logger.error(f"Erreur nettoyage sessions expirées: {e}")
