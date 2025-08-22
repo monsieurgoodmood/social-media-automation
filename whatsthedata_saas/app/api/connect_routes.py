@@ -656,6 +656,185 @@ async def _get_linkedin_organizations(access_token: str) -> list:
     logger.error("Impossible de récupérer les organisations LinkedIn")
     return []
 
+
+# ================================
+# 🔗 OAUTH FACEBOOK ROBUSTE  
+# ================================
+
+@router.get("/auth/facebook")
+async def facebook_oauth_start(state: str):
+    """Démarrer OAuth Facebook avec validation"""
+    
+    session_data = SessionManager.get_session(state)
+    if not session_data:
+        raise HTTPException(status_code=400, detail="Session invalide")
+    
+    try:
+        facebook_params = {
+            'client_id': Config.FB_CLIENT_ID,
+            'redirect_uri': f"{Config.BASE_URL}/auth/facebook/callback",
+            'scope': 'pages_read_engagement,pages_show_list,read_insights',
+            'state': state
+        }
+        
+        facebook_auth_url = f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(facebook_params)}"
+        
+        # Marquer tentative Facebook
+        session_data['facebook_attempt'] = datetime.now()
+        SessionManager.update_session(state, session_data)
+        
+        return RedirectResponse(facebook_auth_url)
+        
+    except Exception as e:
+        logger.error(f"Erreur démarrage Facebook OAuth: {e}")
+        raise HTTPException(status_code=500, detail="Erreur configuration Facebook")
+
+@router.get("/auth/facebook/callback")
+async def facebook_oauth_callback(
+    request: Request,
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None)
+):
+    """Callback Facebook avec récupération complète"""
+    
+    logger.info(f"Callback Facebook: state={state[:8] if state else 'None'}..., error={error}")
+    
+    if error:
+        logger.warning(f"Erreur Facebook OAuth: {error}")
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": f"Connexion Facebook échouée: {error}",
+            "retry_url": f"/auth/facebook?state={state}" if state else "/connect"
+        })
+    
+    if not code or not state:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": "Paramètres Facebook manquants",
+            "retry_url": "/connect"
+        })
+    
+    session_data = SessionManager.get_session(state)
+    if not session_data:
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": "Session Facebook expirée",
+            "retry_url": "/connect"
+        })
+    
+    try:
+        # Échanger code contre token
+        token_data = await _exchange_facebook_code(code, state)
+        access_token = token_data.get('access_token')
+        
+        if not access_token:
+            raise Exception("Token Facebook manquant")
+        
+        # Récupérer pages
+        pages = await _get_facebook_pages(access_token)
+        
+        # Mettre à jour session
+        session_data.update({
+            'facebook_pages': pages,
+            'facebook_connected': True,
+            'facebook_token': access_token,
+            'step': 'facebook_connected'
+        })
+        
+        SessionManager.update_session(state, session_data)
+        
+        logger.info(f"Facebook connecté avec {len(pages)} pages")
+        return RedirectResponse(f"/connect/pages?state={state}")
+        
+    except Exception as e:
+        logger.error(f"Erreur callback Facebook: {e}")
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "error": f"Erreur connexion Facebook: {str(e)}",
+            "retry_url": f"/connect/social?state={state}"
+        })
+
+async def _exchange_facebook_code(code: str, state: str) -> dict:
+    """Échanger code Facebook avec retry"""
+    
+    token_data = {
+        'client_id': Config.FB_CLIENT_ID,
+        'client_secret': Config.FB_CLIENT_SECRET,
+        'redirect_uri': f"{Config.BASE_URL}/auth/facebook/callback",
+        'code': code
+    }
+    
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    "https://graph.facebook.com/v21.0/oauth/access_token",
+                    params=token_data
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                    
+                logger.warning(f"Tentative {attempt + 1} token Facebook échouée: {response.status_code}")
+                
+        except Exception as e:
+            logger.warning(f"Tentative {attempt + 1} token Facebook erreur: {e}")
+            
+        if attempt < 2:
+            await asyncio.sleep(1)
+    
+    raise Exception("Impossible d'échanger le code Facebook")
+
+async def _get_facebook_pages(access_token: str) -> list:
+    """Récupérer pages Facebook avec retry"""
+    
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    "https://graph.facebook.com/v21.0/me/accounts",
+                    params={
+                        'access_token': access_token,
+                        'fields': 'id,name,category,access_token,tasks,about,picture.type(large)',
+                        'limit': 100
+                    }
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    pages = []
+                    
+                    for page_data in data.get('data', []):
+                        tasks = page_data.get('tasks', [])
+                        if any(task in ['MANAGE', 'CREATE_CONTENT', 'MODERATE', 'ADVERTISE', 'ANALYZE'] for task in tasks):
+                            pages.append({
+                                'id': page_data.get('id'),
+                                'name': page_data.get('name'),
+                                'category': page_data.get('category'),
+                                'access_token': page_data.get('access_token'),
+                                'tasks': tasks,
+                                'about': page_data.get('about', ''),
+                                'picture_url': page_data.get('picture', {}).get('data', {}).get('url'),
+                                'can_analyze': 'ANALYZE' in tasks,
+                                'can_manage': 'MANAGE' in tasks
+                            })
+                    
+                    return pages
+                    
+                logger.warning(f"Tentative {attempt + 1} pages Facebook échouée: {response.status_code}")
+                
+        except Exception as e:
+            logger.warning(f"Tentative {attempt + 1} pages Facebook erreur: {e}")
+            
+        if attempt < 2:
+            await asyncio.sleep(1)
+    
+    # En cas d'échec, retourner liste vide
+    logger.error("Impossible de récupérer les pages Facebook")
+    return []
+
+
 # ================================
 # 📊 SÉLECTION PAGES FINALE
 # ================================
