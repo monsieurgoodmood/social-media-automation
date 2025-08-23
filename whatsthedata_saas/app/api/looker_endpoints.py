@@ -24,8 +24,8 @@ from ..database.connection import db_manager
 from ..database.models import User, FacebookAccount, LinkedinAccount, SocialAccessToken
 from ..utils.config import Config
 from ..utils.metrics import MetricsManager
-from ..utils.metrics.linkedin_metrics import LinkedInMetrics  
-from ..utils.metrics.facebook_metrics import FacebookMetrics
+
+
 # Ajouter en haut du fichier
 from functools import lru_cache
 import hashlib
@@ -1478,3 +1478,174 @@ async def test_api_connections(user_email: str) -> Dict[str, Any]:
         logger.error(f"Erreur test API connections: {e}")
     
     return results
+
+@router.get("/test-data-extended")
+async def get_test_data_extended():
+    """Endpoint de test avec toutes les métriques LinkedIn + Facebook pour template Looker Studio"""
+    
+    from datetime import datetime, timedelta
+    import random
+    
+    try:
+        # Imports locaux dans la fonction pour éviter les conflits au niveau module
+        from app.utils.metrics.linkedin_metrics import LinkedInMetrics
+        from app.utils.metrics.facebook_metrics import FacebookMetrics
+        
+        linkedin_metrics = LinkedInMetrics()
+        facebook_metrics = FacebookMetrics()
+    except Exception as e:
+        logger.error(f"Erreur import metrics: {e}")
+        return {
+            "success": False,
+            "error": f"Import error: {str(e)}",
+            "generated_at": datetime.now().isoformat()
+        }
+    
+    # Générer 30 jours de données
+    base_date = datetime.now().date()
+    data = {
+        "success": True,
+        "data": {
+            "linkedin_data": {
+                "page_metrics": [],
+                "post_metrics": []
+            },
+            "facebook_data": {
+                "page_metrics": [],
+                "post_metrics": []
+            }
+        },
+        "generated_at": datetime.now().isoformat(),
+        "user_email": "test@whatsthedata.com",
+        "total_records": 0,
+        "status": "test_data_extended"
+    }
+    
+    # Données LinkedIn - Page Metrics (30 jours)
+    linkedin_page_metrics_list = linkedin_metrics.get_page_metrics()
+    for i in range(30):
+        current_date = base_date - timedelta(days=i)
+        page_data = {
+            "date": current_date.strftime("%Y-%m-%d"),
+            "platform": "linkedin",
+            "account_name": "Test LinkedIn Company",
+            "account_id": "12345678"
+        }
+        
+        # Ajouter toutes les métriques LinkedIn page avec valeurs réalistes
+        for metric in linkedin_page_metrics_list:
+            if "percentage" in metric:
+                page_data[f"linkedin_{metric}"] = round(random.uniform(10, 40), 2)
+            elif "followers" in metric:
+                page_data[f"linkedin_{metric}"] = random.randint(2000, 5000) + i * 10
+            elif "views" in metric:
+                page_data[f"linkedin_{metric}"] = random.randint(100, 2000)
+            elif "clicks" in metric:
+                page_data[f"linkedin_{metric}"] = random.randint(10, 200)
+            else:
+                page_data[f"linkedin_{metric}"] = random.randint(5, 500)
+        
+        data["data"]["linkedin_data"]["page_metrics"].append(page_data)
+    
+    # Données LinkedIn - Post Metrics (10 posts factices)
+    linkedin_post_metrics_list = linkedin_metrics.get_post_metrics()
+    for i in range(10):
+        current_date = base_date - timedelta(days=i*3)
+        post_data = {
+            "date": current_date.strftime("%Y-%m-%d"),
+            "platform": "linkedin",
+            "account_name": "Test LinkedIn Company",
+            "account_id": "12345678",
+            "post_id": f"linkedin_post_{i}",
+            "post_type": "ugcPost",
+            "post_creation_date": current_date.strftime("%Y-%m-%d"),
+            "post_text": f"Test LinkedIn post #{i+1}"
+        }
+        
+        # Ajouter toutes les métriques LinkedIn post
+        for metric in linkedin_post_metrics_list:
+            if "percentage" in metric:
+                post_data[f"linkedin_{metric}"] = round(random.uniform(5, 25), 2)
+            elif "reactions" in metric:
+                post_data[f"linkedin_{metric}"] = random.randint(1, 50)
+            elif "impressions" in metric:
+                post_data[f"linkedin_{metric}"] = random.randint(500, 5000)
+            elif "clicks" in metric:
+                post_data[f"linkedin_{metric}"] = random.randint(10, 100)
+            else:
+                post_data[f"linkedin_{metric}"] = random.randint(1, 200)
+        
+        data["data"]["linkedin_data"]["post_metrics"].append(post_data)
+    
+    # Données Facebook - Page Metrics (30 jours)
+    facebook_page_metrics_list = facebook_metrics.get_page_metrics()
+    for i in range(30):
+        current_date = base_date - timedelta(days=i)
+        page_data = {
+            "date": current_date.strftime("%Y-%m-%d"),
+            "platform": "facebook",
+            "account_name": "Test Facebook Page",
+            "account_id": "98765432"
+        }
+        
+        # Ajouter toutes les métriques Facebook page
+        for metric in facebook_page_metrics_list:
+            if "fans" in metric:
+                page_data[f"facebook_{metric}"] = random.randint(3000, 8000) + i * 15
+            elif "impressions" in metric:
+                page_data[f"facebook_{metric}"] = random.randint(1000, 10000)
+            elif "views" in metric:
+                page_data[f"facebook_{metric}"] = random.randint(200, 3000)
+            elif "video" in metric:
+                page_data[f"facebook_{metric}"] = random.randint(50, 1500)
+            else:
+                page_data[f"facebook_{metric}"] = random.randint(10, 800)
+        
+        data["data"]["facebook_data"]["page_metrics"].append(page_data)
+    
+    # Données Facebook - Post Metrics (10 posts factices)
+    facebook_post_metrics_list = facebook_metrics.get_post_metrics()
+    for i in range(10):
+        current_date = base_date - timedelta(days=i*3)
+        post_data = {
+            "date": current_date.strftime("%Y-%m-%d"),
+            "platform": "facebook",
+            "account_name": "Test Facebook Page",
+            "account_id": "98765432",
+            "post_id": f"98765432_{i}",
+            "post_type": "status",
+            "post_creation_date": current_date.strftime("%Y-%m-%d"),
+            "post_text": f"Test Facebook post #{i+1}"
+        }
+        
+        # Ajouter toutes les métriques Facebook post
+        for metric in facebook_post_metrics_list:
+            if "impressions" in metric:
+                post_data[f"facebook_{metric}"] = random.randint(800, 8000)
+            elif "reactions" in metric:
+                post_data[f"facebook_{metric}"] = random.randint(2, 80)
+            elif "clicks" in metric:
+                post_data[f"facebook_{metric}"] = random.randint(5, 150)
+            elif "video" in metric:
+                post_data[f"facebook_{metric}"] = random.randint(20, 2000)
+            else:
+                post_data[f"facebook_{metric}"] = random.randint(1, 300)
+        
+        data["data"]["facebook_data"]["post_metrics"].append(post_data)
+    
+    # Calculer total records
+    total_records = (
+        len(data["data"]["linkedin_data"]["page_metrics"]) +
+        len(data["data"]["linkedin_data"]["post_metrics"]) +
+        len(data["data"]["facebook_data"]["page_metrics"]) +
+        len(data["data"]["facebook_data"]["post_metrics"])
+    )
+    data["total_records"] = total_records
+    
+    return data
+
+
+
+@router.get("/debug-test")
+def debug_test():
+    return {"message": "Module loaded successfully"}
