@@ -1,3 +1,5 @@
+from typing import List, Dict
+
 """
 Configuration complète des métriques Facebook pour WhatsTheData
 Extrait des scripts fb_page_metrics.py, fb_posts_lifetime.py et fb_posts_metadata.py
@@ -406,3 +408,37 @@ ALL_FACEBOOK_METRICS = PAGE_METRICS + POST_METRICS
 TOTAL_FACEBOOK_METRICS_COUNT = len(ALL_FACEBOOK_METRICS)
 
 print(f"Configuration Facebook chargée: {TOTAL_FACEBOOK_METRICS_COUNT} métriques disponibles")
+
+
+# ========================================
+# CLASSE FACEBOOK METRICS
+# ========================================
+
+class FacebookMetrics:
+    """Gestionnaire des métriques Facebook pour WhatsTheData"""
+    
+    def __init__(self):
+        self.page_metrics = PAGE_METRICS
+        self.post_metrics = POST_METRICS
+        self.all_metrics = ALL_FACEBOOK_METRICS
+        self.column_mapping = FACEBOOK_COLUMN_MAPPING
+    
+    def get_page_metrics(self) -> List[str]:
+        """Retourne les métriques de page Facebook"""
+        return self.page_metrics
+    
+    def get_post_metrics(self) -> List[str]:
+        """Retourne les métriques de posts Facebook"""
+        return self.post_metrics
+    
+    def get_all_metrics(self) -> List[str]:
+        """Retourne toutes les métriques Facebook"""
+        return self.all_metrics
+    
+    def get_column_mapping(self) -> Dict[str, str]:
+        """Retourne le mapping des noms de colonnes"""
+        return self.column_mapping
+    
+    def get_looker_schema(self) -> Dict:
+        """Retourne le schéma pour Looker Studio"""
+        return get_facebook_looker_schema()
