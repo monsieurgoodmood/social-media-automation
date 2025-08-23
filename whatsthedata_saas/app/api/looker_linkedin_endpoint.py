@@ -83,8 +83,8 @@ class LinkedInMetricsRequest(BaseModel):
     
     platforms: List[str] = Field(default=["linkedin"], description="Toujours LinkedIn pour cet endpoint")
     date_range: int = Field(default=30, ge=1, le=365, description="Nombre de jours (1-365)")
-    start_date: Optional[str] = Field(None, regex=r'^\d{4}-\d{2}-\d{2}$', description="Date début YYYY-MM-DD")
-    end_date: Optional[str] = Field(None, regex=r'^\d{4}-\d{2}-\d{2}$', description="Date fin YYYY-MM-DD")
+    start_date: Optional[str] = Field(None, pattern=r'^\d{4}-\d{2}-\d{2}$', description="Date début YYYY-MM-DD")
+    end_date: Optional[str] = Field(None, pattern=r'^\d{4}-\d{2}-\d{2}$', description="Date fin YYYY-MM-DD")
     
     metrics_scope: MetricsScope = Field(default=MetricsScope.ALL, description="Portée des métriques")
     aggregation_level: AggregationLevel = Field(default=AggregationLevel.DAILY, description="Niveau d'agrégation")
@@ -790,11 +790,12 @@ async def get_linkedin_complete_metrics(request: Request):
                     user = session.query(User).filter(User.email == user_email).first()
                     
                     if not user:
+                        # APRÈS
                         return JSONResponse(
-                            status_code=404,
+                            status_code=200,  # ← Changé en 200
                             content={
                                 "success": False,
-                                "error": "USER_NOT_FOUND",
+                                "error": "USER_NOT_FOUND", 
                                 "message": "Utilisateur non trouvé dans la base"
                             }
                         )
@@ -1002,7 +1003,7 @@ async def linkedin_health_check():
             linkedin_status = "unreachable"
         
         # Test token disponible
-        token_available = bool(Config.COMMUNITY_ACCESS_TOKEN)
+        token_available = bool(getattr(Config, 'COMMUNITY_ACCESS_TOKEN', None))
         
         # Test base de données
         db_status = "unknown"
